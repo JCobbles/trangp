@@ -34,7 +34,8 @@ def load_barenco_puma():
     genes_se.rename(index=index, inplace=True)
 
     # Reorder genes
-    genes = genes.reindex(['DDB2', 'SESN1', 'TNFRSF10b', 'p21', 'BIK', 'p53']).values
+    df_genes = genes.reindex(['DDB2', 'SESN1', 'TNFRSF10b', 'p21', 'BIK', 'p53'])
+    genes = df_genes.values
     genes_se = genes_se.reindex(['DDB2', 'SESN1', 'TNFRSF10b', 'p21', 'BIK', 'p53']).values
 
     Y_var = genes_se*genes_se
@@ -46,4 +47,4 @@ def load_barenco_puma():
     Y = Y / scale_mat
     Y_var = Y_var / (scale_mat * scale_mat)
 
-    return df, genes, genes_se, Y, Y_var
+    return df_genes, genes, genes_se, Y, Y_var
