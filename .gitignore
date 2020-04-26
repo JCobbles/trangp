@@ -2,3 +2,5 @@
 E_coli_v4_Build_6/
 
 .ipynb_checkpoints/
+data/
+__pycache__/

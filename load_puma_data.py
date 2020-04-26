@@ -5,13 +5,13 @@ import numpy as np
 def load_barenco_puma():
     mmgmos_processed = True
     if mmgmos_processed:
-        with open('barencoPUMA_exprs.csv', 'r') as f:
+        with open('data/barencoPUMA_exprs.csv', 'r') as f:
             df = pd.read_csv(f, index_col=0)
-        with open('barencoPUMA_se.csv', 'r') as f:
+        with open('data/barencoPUMA_se.csv', 'r') as f:
             dfe = pd.read_csv(f, index_col=0)
         columns = [f'cARP1-{t}hrs.CEL' for t in np.arange(7)*2]
     else:
-        with open('barenco_processed.tsv', 'r') as f:
+        with open('data/barenco_processed.tsv', 'r') as f:
             df = pd.read_csv(f, delimiter='\t', index_col=0)
 
         columns = [f'H_ARP1-{t}h.3' for t in np.arange(7)*2]
