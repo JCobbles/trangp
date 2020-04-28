@@ -1,3 +1,22 @@
+import numpy as np
+
+def discretise(t, num_disc = 10):
+    gcd = np.gcd.reduce(t)
+    t_augmented = np.arange(0, t[-1]+gcd, gcd)
+    N = t_augmented.shape[0]
+    
+    def calc_N_p(N_p, num_disc):
+        '''A helper recursive function to ensure t is a subset of τ'''
+        if num_disc <= 0:
+            return N_p
+        return N_p -1 + calc_N_p(N_p, num_disc-1)
+    N_p = calc_N_p(N, num_disc)  # Number of time discretisations
+    τ = np.linspace(0, t_augmented[-1], N_p, dtype='float64')    # Discretised observation times
+    i = int(t[0]/gcd)
+    τ = τ[i*num_disc+i:]
+    common_indices = np.searchsorted(τ, t)
+    return τ, common_indices
+
 def get_rbf_dist(times, N):
     t_1 = np.reshape(np.tile(times, N), [N, N]).T
     t_2 = np.reshape(np.tile(times, N), [N, N])
