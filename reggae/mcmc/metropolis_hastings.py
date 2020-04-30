@@ -1,30 +1,10 @@
 import numpy as np
-from .utilities import get_rbf_dist, exp, mult, ArrayList, discretise
+from reggae.utilities import get_rbf_dist, exp, mult, ArrayList, discretise
+
 from ipywidgets import IntProgress
 from tensorflow import is_tensor
 import random
-
-class Parameter():
-    def __init__(self, name, prior, initial_value, step_size=1., proposal_dist=None, constraint=None, fixed=False):
-        self.name = name
-        self.prior = prior
-        self.step_size = step_size
-        self.proposal_dist = proposal_dist
-        if constraint is None:
-            self.constrained = lambda x:x
-        else:
-            self.constrained = constraint
-        self.value = initial_value
-        self.fixed = fixed
-
-    def constrain(self, *args):
-        return self.constrained(*args)
-
-    def propose(self, *args):
-        if self.fixed:
-            return self.value
-        assert self.proposal_dist is not None, 'proposal_dist must not be None if you use propose()'
-        return self.proposal_dist(*args).sample().numpy()
+from IPython.display import display
 
 
 class MetropolisHastings():
@@ -38,7 +18,7 @@ class MetropolisHastings():
 
     def sample(self, T=20000, store_every=10, burn_in=1000, report_every=100, tune_every=50):
         print('----- Metropolis Begins -----')
-
+        
         self.acceptance_rates = {param.name: 0. for param in self.params} # Reset acceptance rates
         self.samples['acc_rates'] = list()
         f = IntProgress(description='Running', min=0, max=T) # instantiate the bar

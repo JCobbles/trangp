@@ -5,7 +5,7 @@ from tensorflow import math as tfm
 from tensorflow_probability import bijectors as tfb
 from tensorflow_probability import distributions as tfd
 
-from ..mcmc import MetropolisHastings, Parameter
+from reggae.mcmc import MetropolisHastings, Parameter
 from ..data_loaders import DataHolder
 from ..utilities import get_rbf_dist, exp, mult, jitter_cholesky
 
@@ -108,6 +108,9 @@ class TranscriptionLikelihood():
             return log_lik, sq_diff
         return log_lik
 
+TupleParams_pre = namedtuple('TupleParams_pre', ['fbar','δbar','kbar','σ2_m','w','w_0','L','V','σ2_f'])
+TupleParams = namedtuple('TupleParams', ['fbar','δbar','kbar','σ2_m','w','w_0','L','V'])
+
 class TranscriptionMCMC(MetropolisHastings):
     '''
     Data is a tuple (m, f) of shapes (num, time)
@@ -174,12 +177,10 @@ class TranscriptionMCMC(MetropolisHastings):
         kbar.proposal_dist=lambda mu: tfd.MultivariateNormalDiag(mu, kbar.step_size)
         
         if not options.preprocessing_variance:
-            params = namedtuple('parameters', ['fbar','δbar','kbar','σ2_m','w','w_0','L','V','σ2_f'])
             σ2_f = Parameter('σ2_f', tfd.InverseGamma(f64(0.01), f64(0.01)), 1e-4*np.ones(self.num_tfs), step_size=tf.constant(0.5, dtype='float64'))
-            super().__init__(params(fbar, δbar, kbar, σ2_m, w, w_0, L, V, σ2_f))
+            super().__init__(TupleParams_pre(fbar, δbar, kbar, σ2_m, w, w_0, L, V, σ2_f))
         else:
-            params = namedtuple('parameters', ['fbar','δbar','kbar','σ2_m','w','w_0','L','V'])
-            super().__init__(params(fbar, δbar, kbar, σ2_m, w, w_0, L, V))
+            super().__init__(TupleParams(fbar, δbar, kbar, σ2_m, w, w_0, L, V))
 
     def fbar_prior_params(self, v, l2):
     #     print('vl2', v, l2)
