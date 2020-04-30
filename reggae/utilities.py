@@ -1,4 +1,5 @@
 import numpy as np
+from tensorflow import linalg
 
 def discretise(t, num_disc = 10):
     gcd = np.gcd.reduce(t)
@@ -32,6 +33,14 @@ def mult(a, b):
     with np.errstate(under='ignore', over='ignore', invalid='ignore'):
         c = a*b
         return np.where(np.isnan(c), 0, c)
+
+def jitter_cholesky(A):
+    try:
+        jitter1 = linalg.diag(1e-7 * np.ones(A.shape[0]))
+        return linalg.cholesky(A + jitter1)
+    except:
+        jitter2 = diag(1e-5 * np.ones(A.shape[0]))
+        return linalg.cholesky(A + jitter2)
 
 class ArrayList:
     def __init__(self, shape):
