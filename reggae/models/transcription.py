@@ -353,7 +353,17 @@ class TranscriptionMCMC(MetropolisHastings):
                 self.acceptance_rates['V'] += 1/self.num_tfs
                 self.acceptance_rates['L'] += 1/self.num_tfs
 
-    def predict_m(self):
+    @staticmethod
+    def initialise_from_state(args, state):
+        model = TranscriptionMCMC(*args)
+        model.acceptance_rates = state.acceptance_rates
+        model.samples = state.samples
+        return model
+
+    def predict_m(self, kbar, δbar, w, fbar, w_0):
+        return self.likelihood.predict_m(kbar, δbar, w, fbar, w_0)
+
+    def predict_m_with_current(self):
         return self.likelihood.predict_m(self.params.kbar.value, 
                                          self.params.δbar.value, 
                                          self.params.w.value, 
