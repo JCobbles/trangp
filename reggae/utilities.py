@@ -7,10 +7,8 @@ def discretise(t, num_disc = 10):
     N = t_augmented.shape[0]
     
     def calc_N_p(N_p, num_disc):
-        '''A helper recursive function to ensure t is a subset of τ'''
-        if num_disc <= 0:
-            return N_p
-        return N_p -1 + calc_N_p(N_p, num_disc-1)
+        '''A helper function to ensure t is a subset of τ'''
+        return (N_p-1)*(num_disc+1)+1
     N_p = calc_N_p(N, num_disc)  # Number of time discretisations
     τ = np.linspace(0, t_augmented[-1], N_p, dtype='float64')    # Discretised observation times
     i = int(t[0]/gcd)
