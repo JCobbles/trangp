@@ -1,4 +1,5 @@
 from tensorflow_probability import mcmc
+from numpy import float64
 class Parameter():
     def __init__(self, 
                  name, 
@@ -15,8 +16,7 @@ class Parameter():
         self.proposal_dist = proposal_dist
         self.hmc_log_prob = hmc_log_prob
         if hmc_log_prob is not None:
-            self.kernel = mcmc.HamiltonianMonteCarlo(hmc_log_prob, step_size=step_size, num_leapfrog_steps=3)
-                #adaptive_hmc = tfp.mcmc.SimpleStepSizeAdaptation(hmc, num_adaptation_steps=2)
+            self.kernel = mcmc.NoUTurnSampler(hmc_log_prob, step_size=step_size)
 
         if constraint is None:
             self.constrained = lambda x:x
