@@ -160,7 +160,7 @@ class TranscriptionMCMC(MetropolisHastings):
 #                 kbar[2] = np.log(0.8)
 #                 kbar[3] = np.log(1.0)
             kbar[kbar < -10] = -10
-            kbar[kbar > 2] = 2
+            kbar[kbar > 3] = 3
             return kbar
         kbar_initial = -0.1*np.float64(np.c_[
             np.ones(self.num_genes), # a_j
