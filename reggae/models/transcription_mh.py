@@ -26,31 +26,30 @@ class TranscriptionLikelihood():
         self.preprocessing_variance = options.preprocessing_variance
         self.num_genes = data.m_obs.shape[0]
 
-    @tf.function
     def predict_m(self, kbar, δbar, w, fbar, w_0):
         # Take relevant parameters out of log-space
-        a_j, b_j, d_j, s_j = (tf.reshape(tfm.exp(kbar[:, i]), (-1, 1)) for i in range(4))
-        δ = tfm.exp(δbar)
-        f_i = tfm.log(1+tfm.exp(fbar))
+        a_j, b_j, d_j, s_j = (np.exp(kbar[:, i]).reshape(-1, 1) for i in range(4))
+        δ = np.exp(δbar)
+        f_i = np.log(1+np.exp(fbar))
         τ = self.data.τ
         N_p = self.data.τ.shape[0]
 
         # Calculate p_i vector
+        p_i = np.zeros(N_p) # TODO it seems the ODE translation model has params A, S see gpmtfComputeTFODE
         Δ = τ[1]-τ[0]
-        sum_term = tfm.multiply(tfm.exp(δ*τ), f_i)
-        p_i = tf.concat([[f64(0)], 0.5*Δ*tfm.cumsum(sum_term[:-1] + sum_term[1:])], axis=0) # Trapezoid rule
-        p_i = tfm.multiply(tfm.exp(-δ*τ), p_i)
+        sum_term = mult(exp(δ*τ), f_i)
+        p_i[1:] = 0.5*Δ*np.cumsum(sum_term[:-1] + sum_term[1:]) # Trapezoid rule
+        p_i = mult(exp(-δ*τ), p_i)
 
         # Calculate m_pred
-        integrals = tf.zeros((self.num_genes, N_p))
-        interactions = w[:, 0][:, None]*tfm.log(p_i+1e-100) + w_0[:, None]
-        G = tfm.sigmoid(interactions) # TF Activation Function (sigmoid)
-        sum_term = G * tfm.exp(d_j*τ)
-        integrals = tf.concat([tf.zeros((5, 1), dtype='float64'), 0.5*Δ*tfm.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) # Trapezoid rule
-
-        exp_dt = tfm.exp(-d_j*τ)
-        integrals = tfm.multiply(exp_dt, integrals)
-        m_pred = b_j/d_j + tfm.multiply((a_j-b_j/d_j), exp_dt) + s_j*integrals
+        integrals = np.zeros((self.num_genes, N_p))
+        interactions = w[:, 0][:, None]*np.log(p_i+1e-100) + w_0[:, None]
+        G = expit(interactions) # TF Activation Function (sigmoid)
+        sum_term = G * exp(d_j*τ)
+        integrals[:, 1:] = 0.5*Δ*np.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1) # Trapezoid rule
+        exp_dt = exp(-d_j*τ)
+        integrals = mult(exp_dt, integrals)
+        m_pred = b_j/d_j + mult((a_j-b_j/d_j), exp_dt) + s_j*integrals
 
         return m_pred
 
@@ -74,18 +73,16 @@ class TranscriptionLikelihood():
         σ2_m = params.σ2_m.value if σ2_m is None else σ2_m
 
         w_0 = params.w_0.value if w_0 is None else w_0 # TODO no hardcode this!
-        return self._genes(δbar, fbar, kbar, w, w_0, σ2_m, return_sq_diff)
-
-    @tf.function
-    def _genes(self, δbar, fbar, kbar, w, w_0, σ2_m, return_sq_diff):
         m_pred = self.predict_m(kbar, δbar, w, fbar, w_0)
-        sq_diff = tfm.square(self.data.m_obs - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
-        variance = tf.reshape(σ2_m, (-1, 1))
+
+        log_lik = np.zeros(self.num_genes)
+        sq_diff = np.square(self.data.m_obs - m_pred[:, self.data.common_indices])
+        variance = σ2_m.reshape(-1, 1)
         if self.preprocessing_variance:
             variance = variance + self.data.σ2_m_pre # add PUMA variance
 #         print(variance.shape, sq_diff.shape)
-        log_lik = -0.5*tfm.log(2*np.pi*(variance)) - 0.5*sq_diff/variance
-        log_lik = tf.reduce_sum(log_lik, axis=1)
+        log_lik = -0.5*np.log(2*np.pi*(variance)) - 0.5*sq_diff/variance
+        log_lik = np.sum(log_lik, axis=1)
         if return_sq_diff:
             return log_lik, sq_diff
         return log_lik
@@ -101,12 +98,12 @@ class TranscriptionLikelihood():
             variance = σ2_f.reshape(-1, 1)
         else:
             variance = self.data.σ2_f_pre
-        f_pred = tfm.log(1+np.exp(fbar))
-        f_pred = tf.reshape(f_pred, (1, -1)) #np.atleast_2d f_pred[:, self.data.common_indices]
-        sq_diff = tfm.square(self.data.f_obs - tf.transpose(tf.gather(tf.transpose(f_pred),self.data.common_indices)))
+        f_pred = np.log(1+np.exp(fbar))
+        f_pred = np.atleast_2d(f_pred)
+        sq_diff = np.square(self.data.f_obs - f_pred[:, self.data.common_indices])
 
-        log_lik = -0.5*tfm.log(2*np.pi*variance) - 0.5*sq_diff/variance
-        log_lik = tf.reduce_sum(log_lik, axis=1)
+        log_lik = -0.5*np.log(2*np.pi*variance) - 0.5*sq_diff/variance
+        log_lik = np.sum(log_lik, axis=1)
         if return_sq_diff:
             return log_lik, sq_diff
         return log_lik
@@ -136,9 +133,9 @@ class TranscriptionMCMC(MetropolisHastings):
         self.h_f = 0.35*tf.ones(self.N_p, dtype='float64')
 
         # Interaction weights
-        w_0 = Parameter('w_0', tfd.Normal(f64(0), f64(2)), np.zeros(self.num_genes), step_size=0.5*tf.ones(self.num_genes, dtype='float64'))
+        w_0 = Parameter('w_0', tfd.Normal(0, 2), np.zeros(self.num_genes), step_size=0.5*tf.ones(self.num_genes, dtype='float64'))
         w_0.proposal_dist=lambda mu, j:tfd.Normal(mu, w_0.step_size[j])
-        w = Parameter('w', tfd.Normal(f64(0), f64(2)), 1*np.ones((self.num_genes, self.num_tfs)), step_size=0.5*tf.ones(self.num_genes, dtype='float64'))
+        w = Parameter('w', tfd.Normal(0, 2), 1*np.ones((self.num_genes, self.num_tfs)), step_size=0.5*tf.ones(self.num_genes, dtype='float64'))
         w.proposal_dist=lambda mu, j:tfd.Normal(mu, w.step_size[j]) #) w_j) # At the moment this is the same as w_j0 (see pg.8)
         # Latent function
         fbar = Parameter('fbar', self.fbar_prior, 0.5*np.ones(self.N_p))
@@ -202,8 +199,7 @@ class TranscriptionMCMC(MetropolisHastings):
             try:
                 return np.float64(tfd.MultivariateNormalFullCovariance(m, K+jitter).log_prob(fbar))
             except:
-                return 0
-
+                return -np.inf
 
     def iterate(self):
         params = self.params
