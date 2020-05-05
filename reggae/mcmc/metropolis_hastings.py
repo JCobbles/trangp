@@ -14,13 +14,12 @@ class MetropolisHastings():
 
     def clear_samples(self):
         self.samples = {param.name: ArrayList(param.value.shape) for param in self.params}
-        self.samples['acc_rates'] = list()
+        self.samples['acc_rates'] = {param.name: ArrayList((1,)) for param in self.params}
 
     def sample(self, T=20000, store_every=10, burn_in=1000, report_every=100, tune_every=50):
         print('----- Metropolis Begins -----')
         
         self.acceptance_rates = {param.name: 0. for param in self.params} # Reset acceptance rates
-        self.samples['acc_rates'] = list()
         f = IntProgress(description='Running', min=0, max=T) # instantiate the bar
         display(f)
         for iteration_number in range(T):
@@ -38,15 +37,19 @@ class MetropolisHastings():
                 # for j in range(num_genes):
                 for param in self.params:
                     if param.value.ndim > 1:
-                        self.samples[param.name].add(param.value.copy())
+                        if is_tensor(param.value):
+                            self.samples[param.name].add(param.value.numpy().copy())
+                        else:
+                            self.samples[param.name].add(param.value.copy())
                     else:
                         self.samples[param.name].add(param.value)
-                self.samples['acc_rates'].append(list(self.acceptance_rates.values()))
+                    acc = self.acceptance_rates[param.name]/(iteration_number if iteration_number > 0 else 1)
+                    self.samples['acc_rates'][param.name].add(acc)
 
-        for key in self.acceptance_rates:
-            self.acceptance_rates[key] /= T
-        rates = np.array(self.samples['acc_rates']).T/np.arange(1, T-burn_in+1, store_every)
-        self.samples['acc_rates'] = rates
+        # for key in self.acceptance_rates:
+        #     self.acceptance_rates[key] /= T
+        # rates = np.array(self.samples['acc_rates']).T/np.arange(1, T-burn_in+1, store_every)
+        # self.samples['acc_rates'] = rates
         f.value = T
         print('----- Finished -----')
 
