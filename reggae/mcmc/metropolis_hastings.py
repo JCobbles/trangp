@@ -1,10 +1,22 @@
 import numpy as np
 from reggae.utilities import get_rbf_dist, exp, mult, ArrayList, discretise
+import tensorflow_probability as tfp
 
 from ipywidgets import IntProgress
 from tensorflow import is_tensor
+import tensorflow as tf
 import random
 from IPython.display import display
+
+f64 = np.float64
+
+class MetropolisKernel(tfp.mcmc.TransitionKernel):
+    def metropolis_is_accepted(self, new_log_prob, old_log_prob):
+        alpha = tf.math.exp(new_log_prob - old_log_prob)
+        return tf.random.uniform((1,), dtype='float64') < tf.math.minimum(f64(1), alpha)
+    #     if is_tensor(alpha):
+    #         alpha = alpha.numpy()
+    #     return not np.isnan(alpha) and random.random() < min(1, alpha)
 
 
 class MetropolisHastings():
