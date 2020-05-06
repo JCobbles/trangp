@@ -11,7 +11,8 @@ class Parameter():
                  constraint=None, 
                  fixed=False,
                  hmc_log_prob=None,
-                 kernel=None):
+                 kernel=None,
+                 requires_all_states=False):
         self.name = name
         self.prior = prior
         self.step_size = step_size
@@ -27,6 +28,7 @@ class Parameter():
             self.constrained = constraint
         self.value = initial_value
         self.fixed = fixed
+        self.requires_all_states = requires_all_states
 
     def constrain(self, *args):
         return self.constrained(*args)
