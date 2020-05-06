@@ -1,5 +1,5 @@
 from multiprocessing import Pool
-from reggae.models import transcription
+from reggae.models import transcription_mh
 
 class ChainResult(object):
     def __init__(self, acceptance_rates, samples):
@@ -33,6 +33,6 @@ def create_chains(model, args, sample_kwargs, num_chains=4, current_state=None):
 
 
 def run_job(args, sample_kwargs):
-    model = transcription.TranscriptionMCMC(*args)
+    model = transcription_mh.TranscriptionMCMC(*args)
     model.sample(**sample_kwargs)
     return ChainResult(model.acceptance_rates, model.samples)

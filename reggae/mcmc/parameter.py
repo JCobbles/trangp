@@ -1,4 +1,5 @@
-from tensorflow_probability import mcmc
+from reggae.mcmc import nuts
+
 from numpy import float64
 class Parameter():
     def __init__(self, 
@@ -9,21 +10,25 @@ class Parameter():
                  proposal_dist=None, 
                  constraint=None, 
                  fixed=False,
-                 hmc_log_prob=None):
+                 hmc_log_prob=None,
+                 kernel=None,
+                 requires_all_states=False):
         self.name = name
         self.prior = prior
         self.step_size = step_size
         self.proposal_dist = proposal_dist
         self.hmc_log_prob = hmc_log_prob
         if hmc_log_prob is not None:
-            self.kernel = mcmc.NoUTurnSampler(hmc_log_prob, step_size=step_size)
-
+            self.kernel = nuts.NoUTurnSampler(hmc_log_prob, step_size=step_size)
+        if kernel is not None:
+            self.kernel = kernel
         if constraint is None:
             self.constrained = lambda x:x
         else:
             self.constrained = constraint
         self.value = initial_value
         self.fixed = fixed
+        self.requires_all_states = requires_all_states
 
     def constrain(self, *args):
         return self.constrained(*args)

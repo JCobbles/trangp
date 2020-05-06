@@ -91,3 +91,18 @@ def load_barenco_puma():
     gene_var = np.float64(gene_var_full / gene_scale**2).reshape(5, 3, 7).swapaxes(0, 1)
 
     return (genes_df, genes), (tfs_df, np.float64(tfs)), gene_var, tf_var, np.arange(7)*2           # Observation times
+
+
+def scaled_barenco_data(f):
+    scale_pred = np.sqrt(np.var(f))
+    barencof = np.array([[0.0, 200.52011, 355.5216125, 205.7574913, 135.0911372, 145.1080997, 130.7046969],
+                         [0.0, 184.0994134, 308.47592, 232.1775328, 153.6595161, 85.7272235, 168.0910562],
+                         [0.0, 230.2262511, 337.5994811, 276.941654, 164.5044287, 127.8653452, 173.6112139]])
+
+    barencof = barencof[0]/(np.sqrt(np.var(barencof[0])))*scale_pred
+    # measured_p53 = df[df.index.isin(['211300_s_at', '201746_at'])]
+    # measured_p53 = measured_p53.mean(0)
+    # measured_p53 = measured_p53*scale_pred
+    measured_p53 = 0
+    
+    return barencof, measured_p53
