@@ -25,20 +25,27 @@ class TranscriptionLikelihood():
         self.preprocessing_variance = options.preprocessing_variance
         self.num_genes = data.m_obs.shape[0]
 
-    def predict_m(self, kbar, δbar, w, fbar, w_0):
-        # Take relevant parameters out of log-space
-        a_j, b_j, d_j, s_j = (np.exp(kbar[:, i]).reshape(-1, 1) for i in range(4))
-        δ = np.exp(δbar)
-        f_i = np.log(1+np.exp(fbar))
+    def calculate_protein(self, fbar, δbar): # Calculate p_i vector
         τ = self.data.τ
         N_p = self.data.τ.shape[0]
-
-        # Calculate p_i vector
+        f_i = np.log(1+np.exp(fbar))
+        δ = np.exp(δbar)
         p_i = np.zeros(N_p) # TODO it seems the ODE translation model has params A, S see gpmtfComputeTFODE
         Δ = τ[1]-τ[0]
         sum_term = mult(exp(δ*τ), f_i)
         p_i[1:] = 0.5*Δ*np.cumsum(sum_term[:-1] + sum_term[1:]) # Trapezoid rule
         p_i = mult(exp(-δ*τ), p_i)
+        return p_i
+
+    def predict_m(self, kbar, δbar, w, fbar, w_0):
+        # Take relevant parameters out of log-space
+        a_j, b_j, d_j, s_j = (np.exp(kbar[:, i]).reshape(-1, 1) for i in range(4))
+        τ = self.data.τ
+        N_p = self.data.τ.shape[0]
+        Δ = τ[1]-τ[0]
+
+        # Calculate p_i vector
+        p_i = self.calculate_protein(fbar, δbar)
 
         # Calculate m_pred
         integrals = np.zeros((self.num_genes, N_p))
