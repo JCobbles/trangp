@@ -24,7 +24,8 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
         self.send_all_states = send_all_states
         self.num_kernels = len(kernels)
         self.one_step_receives_state = [len(signature(k.one_step).parameters)>2 for k in kernels]
-        
+        super().__init__()
+
     def one_step(self, current_state, previous_kernel_results):
 #         print('running', current_state, previous_kernel_results)
         new_state = list()
@@ -35,17 +36,25 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
                 wrapped_state_i = current_state[i]
                 if type(wrapped_state_i) is not list:
                     wrapped_state_i = [wrapped_state_i]
-                previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
+                # ir = previous_kernel_results.inner_results[i].inner_results
+                # ir = ir._replace(
+                previous_kernel_results.inner_results[i]._replace(
                     target_log_prob=self.kernels[i].target_log_prob_fn(current_state)(*wrapped_state_i))
 
             self.kernels[i].all_states_hack = current_state
-            if self.one_step_receives_state[i]:
-                result_state, kernel_results = self.kernels[i].one_step(
-                    current_state[i], previous_kernel_results.inner_results[i], current_state)
-            else:
-                result_state, kernel_results = self.kernels[i].one_step(
-                    current_state[i], previous_kernel_results.inner_results[i])
-
+            if hasattr(self.kernels[i], 'inner_kernel'):
+                self.kernels[i].inner_kernel.all_states_hack = current_state
+            
+            try:
+                if self.one_step_receives_state[i]:
+                    result_state, kernel_results = self.kernels[i].one_step(
+                        current_state[i], previous_kernel_results.inner_results[i], current_state)
+                else:
+                    result_state, kernel_results = self.kernels[i].one_step(
+                        current_state[i], previous_kernel_results.inner_results[i])
+            except Exception as e:
+                tf.print('Failed at ', i, self.kernels[i], current_state)
+                raise e
 #                 print(result_state, kernel_results)
 
             new_state.append(result_state)
@@ -68,6 +77,9 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
         inner_kernels_bootstraps = list()
         for i in range(self.num_kernels):
             self.kernels[i].all_states_hack = init_state
+
+            if hasattr(self.kernels[i], 'inner_kernel'):
+                self.kernels[i].inner_kernel.all_states_hack = init_state
             if self.one_step_receives_state[i]:
                 inner_kernels_bootstraps.append(
                     self.kernels[i].bootstrap_results(init_state[i], init_state))
