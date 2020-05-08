@@ -112,29 +112,29 @@ class FKernel(MetropolisKernel):
         # Untransformed tf mRNA vectors F (Step 1)
         fbar = current_state
         old_probs = list()
-        for i in range(self.num_tfs):
-            # Gibbs step
-            z_i = tf.reshape(tfd.MultivariateNormalDiag(fbar, self.h_f).sample(), (1, -1))
-            # MH
-            rbf_params = (all_states[self.state_indices['rbf_params']][0], all_states[self.state_indices['rbf_params']][1])
-            m, K = self.fbar_prior_params(*rbf_params)
-            invKsigmaK = tf.matmul(tf.linalg.inv(K+tf.linalg.diag(self.h_f)), K) # (C_i + hI)C_i
-            L = jitter_cholesky(K-tf.matmul(K, invKsigmaK))
-            c_mu = tf.matmul(z_i, invKsigmaK)
-            fstar = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
-            fstar = tf.reshape(fstar, (-1, ))
-            
-            new_prob = self.calculate_probability(fstar, all_states)
-            old_prob = previous_kernel_results.target_log_prob[i] #tf.reduce_sum(old_m_likelihood) + old_f_likelihood
-            is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
-            
-            prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
-            old_probs.append(prob)
+        # TODO check works with multiple TFs
+        # Gibbs step
+        z_i = tf.reshape(tfd.MultivariateNormalDiag(fbar, self.h_f).sample(), (1, -1))
+        # MH
+        rbf_params = (all_states[self.state_indices['rbf_params']][0], all_states[self.state_indices['rbf_params']][1])
+        m, K = self.fbar_prior_params(*rbf_params)
+        invKsigmaK = tf.matmul(tf.linalg.inv(K+tf.linalg.diag(self.h_f)), K) # (C_i + hI)C_i
+        L = jitter_cholesky(K-tf.matmul(K, invKsigmaK))
+        c_mu = tf.matmul(z_i, invKsigmaK)
+        fstar = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
 
-            fbar = tf.cond(tf.equal(is_accepted, tf.constant(False)),
-                          lambda:fbar, lambda:fstar)
-            
-        return fbar, GenericResults(old_probs, is_accepted[0]) # TODO for multiple TFs
+        new_prob = self.calculate_probability(fstar, all_states)
+        old_prob = previous_kernel_results.target_log_prob #tf.reduce_sum(old_m_likelihood) + old_f_likelihood
+
+        is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
+        
+        prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
+
+
+        fbar = tf.cond(tf.equal(is_accepted, tf.constant(False)),
+                        lambda:fbar, lambda:fstar)
+
+        return fbar, GenericResults(prob, is_accepted[0]) # TODO for multiple TFs
     
     def calculate_probability(self, fstar, all_states):
         new_m_likelihood = self.likelihood.genes(
@@ -151,12 +151,9 @@ class FKernel(MetropolisKernel):
         return new_prob
 
     def bootstrap_results(self, init_state, all_states):
-        probs = list()
-        for i in range(self.num_tfs):
-            prob = self.calculate_probability(init_state, all_states)
-            probs.append(prob)
+        prob = self.calculate_probability(init_state, all_states)
 
-        return GenericResults(probs, True) #TODO automatically adjust
+        return GenericResults(prob, True) #TODO automatically adjust
     
     def is_calibrated(self):
         return True
