@@ -1,10 +1,15 @@
 from matplotlib import pyplot as plt
 import numpy as np
 
-def plot_kinetics(m_df, kbar, plot_barenco=False):
-    plt.figure(figsize=(14, 14))
+def plot_kinetics(m_df, kbar, plot_barenco=False, num_avg=50):
+    k_latest = np.exp(np.mean(kbar[-num_avg:], axis=0))
     num_genes = kbar.shape[1]
-    k_latest = np.exp(np.mean(kbar[-100:], axis=0))
+    plt.figure()
+    A = k_latest[:, 0]
+    for j in range(num_genes):
+        plt.bar(np.arange(num_genes), A, width=0.4, tick_label=m_df.index, label='Model')
+
+    plt.figure(figsize=(14, 14))
     B = k_latest[:,1]
     D = k_latest[:,2]
     S = k_latest[:,3]
@@ -49,3 +54,17 @@ def plot_kinetics_convergence(kbar):
         plt.legend()
         ax.set_title(f'Gene {j}')
     plt.tight_layout()
+
+
+def plot_genes(m_df, m_pred, m_observed, common_indices):
+    num_genes = m_pred.shape[0]
+    N_p = m_pred.shape[1]
+    for j in range(num_genes):
+        ax = plt.subplot(531+j)
+        plt.title(m_df.index[j])
+        plt.scatter(common_indices, m_observed[j], marker='x')
+        # plt.errorbar([n*10+n for n in range(7)], Y[j], 2*np.sqrt(Y_var[j]), fmt='none', capsize=5)
+        plt.plot(m_pred[j,:], color='grey')
+        plt.xticks(np.arange(N_p)[common_indices])
+        ax.set_xticklabels(t)
+        plt.xlabel('Time (h)')
