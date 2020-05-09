@@ -10,5 +10,5 @@ MixedKernelResults = collections.namedtuple('MixedKernelResults', [
 #     'grads_target_log_prob',
 #     'step_size',
 #     'log_accept_ratio',
-#     'is_accepted',
+    'is_accepted',
 ])
