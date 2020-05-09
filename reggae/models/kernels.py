@@ -36,14 +36,14 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
                 wrapped_state_i = current_state[i]
                 if type(wrapped_state_i) is not list:
                     wrapped_state_i = [wrapped_state_i]
-                # ir = previous_kernel_results.inner_results[i].inner_results
-                # ir = ir._replace(
-                previous_kernel_results.inner_results[i]._replace(
+
+                previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
                     target_log_prob=self.kernels[i].target_log_prob_fn(current_state)(*wrapped_state_i))
 
             self.kernels[i].all_states_hack = current_state
-            if hasattr(self.kernels[i], 'inner_kernel'):
-                self.kernels[i].inner_kernel.all_states_hack = current_state
+
+            # if hasattr(self.kernels[i], 'inner_kernel'):
+            #     self.kernels[i].inner_kernel.all_states_hack = current_state
             
             try:
                 if self.one_step_receives_state[i]:
@@ -57,9 +57,10 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
                 raise e
 #                 print(result_state, kernel_results)
 
-            new_state.append(result_state)
-#             if i == 4:
-#                 tf.print(kernel_results)
+            if type(result_state) is list: # Fix since list states don't copy, they reference
+                new_state.append([tf.identity(res) for res in result_state])
+            else:
+                new_state.append(result_state)
             inner_results.append(kernel_results)
         
         
