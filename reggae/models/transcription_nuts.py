@@ -8,7 +8,7 @@ from tensorflow_probability import distributions as tfd
 from reggae.mcmc import MetropolisHastings, Parameter, MetropolisKernel
 from reggae.models.results import GenericResults
 from reggae.data_loaders import DataHolder
-from ..utilities import get_rbf_dist, exp, mult, jitter_cholesky
+from ..utilities import get_rbf_dist, exp, mult, jitter_cholesky, logit
 
 import numpy as np
 from scipy.special import expit
@@ -20,8 +20,6 @@ class Options():
         self.preprocessing_variance = preprocessing_variance
         self.tf_mrna_present = tf_mrna_present
 
-def inv_logistic(x):
-    return tfm.exp(x)/(1+tfm.exp(x))
 
 class TranscriptionLikelihood():
     def __init__(self, data: DataHolder, options: Options):
@@ -34,7 +32,7 @@ class TranscriptionLikelihood():
     def calculate_protein(self, fbar, δbar): # Calculate p_i vector
         τ = self.data.τ
         f_i = tfm.log(1+tfm.exp(fbar))
-        δ_i = tf.reshape(inv_logistic(δbar), (-1, 1))
+        δ_i = tf.reshape(logit(δbar), (-1, 1))
         Δ = τ[1]-τ[0]
         sum_term = tfm.multiply(tfm.exp(δ_i*τ), f_i)
         p_i = tf.concat([tf.zeros((self.num_tfs, 1), dtype='float64'),
@@ -45,7 +43,7 @@ class TranscriptionLikelihood():
     @tf.function
     def predict_m(self, kbar, δbar, w, fbar, w_0):
         # Take relevant parameters out of log-space
-        a_j, b_j, d_j, s_j = (tf.reshape(inv_logistic(kbar[:, i]), (-1, 1)) for i in range(4))
+        a_j, b_j, d_j, s_j = (tf.reshape(logit(kbar[:, i]), (-1, 1)) for i in range(4))
         τ = self.data.τ
         N_p = self.data.τ.shape[0]
 

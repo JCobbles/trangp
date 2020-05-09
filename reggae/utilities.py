@@ -93,7 +93,7 @@ class LogisticNormal():
         log_prob = self.dist.log_prob(x)
         log_prob = tf.where(
             tf.math.is_nan(log_prob),
-            -1e10*tf.ones([], log_prob.dtype),
+            -1e3*tf.ones([], log_prob.dtype),
             log_prob)
 
         return log_prob
