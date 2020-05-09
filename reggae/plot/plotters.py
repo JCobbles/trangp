@@ -1,9 +1,10 @@
 from matplotlib import pyplot as plt
 import numpy as np
+import arviz
 
-def plot_kinetics(m_df, kbar, plot_barenco=False, num_avg=50):
-    k_latest = np.exp(np.mean(kbar[-num_avg:], axis=0))
-    num_genes = kbar.shape[1]
+def plot_kinetics(m_df, k, plot_barenco=False, num_avg=50):
+    k_latest = np.mean(k[-num_avg:], axis=0)
+    num_genes = k.shape[1]
     plt.figure()
     A = k_latest[:, 0]
     for j in range(num_genes):
@@ -39,32 +40,40 @@ def plot_kinetics(m_df, kbar, plot_barenco=False, num_avg=50):
         plt.legend()
 
 
-def plot_kinetics_convergence(kbar):
-    num_genes = kbar.shape[1]
+def plot_kinetics_convergence(k):
+    num_genes = k.shape[1]
     labels = ['a', 'b', 'd', 's']
     plt.figure(figsize=(14, 14))
     plt.title('Transcription ODE kinetic parameters')
     for j in range(num_genes):
         ax = plt.subplot(num_genes, 2, j+1)
-        k_param = kbar[:, j, :]
+        k_param = k[:, j, :]
         
-        for k in range(4):
-            plt.plot(k_param[:, k], label=labels[k])
-        plt.axhline(np.mean(k_param[-200:, 3]))
+        for i in range(4):
+            plt.plot(k_param[:, i], label=labels[i])
+        plt.axhline(np.mean(k_param[-50:, 3]))
         plt.legend()
         ax.set_title(f'Gene {j}')
     plt.tight_layout()
 
 
-def plot_genes(m_df, m_pred, m_observed, common_indices):
-    num_genes = m_pred.shape[0]
-    N_p = m_pred.shape[1]
+def plot_genes(m_df, m_preds, data, num_hpd=20):
+    num_genes = m_preds[0].shape[0]
+    N_p = m_preds[0].shape[1]
     for j in range(num_genes):
         ax = plt.subplot(531+j)
         plt.title(m_df.index[j])
-        plt.scatter(common_indices, m_observed[j], marker='x')
+        plt.scatter(data.common_indices, data.m_obs[j], marker='x', label='Observed')
         # plt.errorbar([n*10+n for n in range(7)], Y[j], 2*np.sqrt(Y_var[j]), fmt='none', capsize=5)
-        plt.plot(m_pred[j,:], color='grey')
-        plt.xticks(np.arange(N_p)[common_indices])
-        ax.set_xticklabels(t)
+
+        for i in range(1, num_hpd):
+            plt.plot(m_preds[-i][j,:], color='grey', alpha=0.5)
+            
+        # HPD:
+        bounds = arviz.hpd(m_preds[:, j,:], credible_interval=0.95)
+        plt.fill_between(np.arange(N_p), bounds[:, 0], bounds[:, 1], color='grey', alpha=0.3, label='95% credibility interval')
+
+        plt.xticks(np.arange(N_p)[data.common_indices])
+        ax.set_xticklabels(np.arange(data.t[-1]))
         plt.xlabel('Time (h)')
+        plt.legend()
