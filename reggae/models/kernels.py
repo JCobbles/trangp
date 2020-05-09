@@ -64,7 +64,7 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
             inner_results.append(kernel_results)
         
         
-        return new_state, MixedKernelResults(inner_results)
+        return new_state, MixedKernelResults(inner_results, is_accepted)
 
     def bootstrap_results(self, init_state):
         """Returns an object with the same type as returned by `one_step(...)[1]`.
@@ -76,19 +76,22 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
         `Tensor`s representing internal calculations made within this function.
         """
         inner_kernels_bootstraps = list()
+        is_accepted = list()
         for i in range(self.num_kernels):
             self.kernels[i].all_states_hack = init_state
 
             if hasattr(self.kernels[i], 'inner_kernel'):
                 self.kernels[i].inner_kernel.all_states_hack = init_state
             if self.one_step_receives_state[i]:
-                inner_kernels_bootstraps.append(
-                    self.kernels[i].bootstrap_results(init_state[i], init_state))
+                results = self.kernels[i].bootstrap_results(init_state[i], init_state)
+                inner_kernels_bootstraps.append(results)
+                    
             else:
-                inner_kernels_bootstraps.append(
-                    self.kernels[i].bootstrap_results(init_state[i]))
+                results = self.kernels[i].bootstrap_results(init_state[i])
+                inner_kernels_bootstraps.append(results)
+            is_accepted.append(results.is_accepted)
 
-        return MixedKernelResults(inner_kernels_bootstraps)
+        return MixedKernelResults(inner_kernels_bootstraps, is_accepted)
 
     def is_calibrated(self):
         return True
