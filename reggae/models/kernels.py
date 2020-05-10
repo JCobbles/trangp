@@ -40,27 +40,34 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
                 previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
                     target_log_prob=self.kernels[i].target_log_prob_fn(current_state)(*wrapped_state_i))
 
+            # if type(wrapped_state_i) is list:
+            #     self.kernels[i].all_states_hack = [tf.identity(res) for res in current_state]
+            # else:
             self.kernels[i].all_states_hack = current_state
 
             # if hasattr(self.kernels[i], 'inner_kernel'):
             #     self.kernels[i].inner_kernel.all_states_hack = current_state
-            
+            args = []
             try:
                 if self.one_step_receives_state[i]:
-                    result_state, kernel_results = self.kernels[i].one_step(
-                        current_state[i], previous_kernel_results.inner_results[i], current_state)
-                else:
-                    result_state, kernel_results = self.kernels[i].one_step(
-                        current_state[i], previous_kernel_results.inner_results[i])
+                    args = [current_state]
+                # state_chained = tf.expand_dims(current_state[i], 0)
+                # print(state_chained)
+                result_state, kernel_results = self.kernels[i].one_step(
+                    current_state[i], previous_kernel_results.inner_results[i], *args)
             except Exception as e:
                 tf.print('Failed at ', i, self.kernels[i], current_state)
                 raise e
 #                 print(result_state, kernel_results)
 
-            if type(result_state) is list: # Fix since list states don't copy, they reference
+            # if i == 3:
+            #     tf.print(result_state, kernel_results.is_accepted)
+            if type(result_state) is list:
                 new_state.append([tf.identity(res) for res in result_state])
             else:
                 new_state.append(result_state)
+
+            is_accepted.append(kernel_results.is_accepted)
             inner_results.append(kernel_results)
         
         
