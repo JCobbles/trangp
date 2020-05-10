@@ -79,7 +79,7 @@ class TranscriptionLikelihood():
         δbar = all_states[state_indices['δbar']] if δbar is None else δbar
         fbar = all_states[state_indices['fbar']] if fbar is None else fbar
         kbar = all_states[state_indices['kbar']] if kbar is None else kbar
-        w = 1*tf.ones((self.num_genes, 1), dtype='float64') # TODO
+        w = 1*tf.ones((self.num_genes, self.num_tfs), dtype='float64') # TODO
         w_0 = tf.zeros(self.num_genes, dtype='float64') # TODO
         # w = all_states[state_indices['w']][0] if w is None else w
         # w_0 = all_states[state_indices['w']][1] if w_0 is None else w_0
@@ -111,11 +111,10 @@ class TranscriptionLikelihood():
         '''
         assert self.options.tf_mrna_present
         if not self.preprocessing_variance:
-            variance = σ2_f.reshape(-1, 1)
+            variance = tf.reshape(σ2_f, (-1, 1))
         else:
             variance = self.data.σ2_f_pre
         f_pred = tfm.log(1+tfm.exp(fbar))
-        f_pred = tf.reshape(f_pred, (1, -1)) #np.atleast_2d f_pred[:, self.data.common_indices]
         sq_diff = tfm.square(self.data.f_obs - tf.transpose(tf.gather(tf.transpose(f_pred),self.data.common_indices)))
 
         log_lik = -0.5*tfm.log(2*np.pi*variance) - 0.5*sq_diff/variance

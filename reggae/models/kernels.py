@@ -118,7 +118,8 @@ class FKernel(MetropolisKernel):
         old_probs = list()
         # TODO check works with multiple TFs
         # Gibbs step
-        z_i = tf.reshape(tfd.MultivariateNormalDiag(fbar, self.h_f).sample(), (1, -1))
+        z_i = tfd.MultivariateNormalDiag(fbar, self.h_f).sample()
+
         # MH
         rbf_params = (all_states[self.state_indices['rbf_params']][0], all_states[self.state_indices['rbf_params']][1])
         m, K = self.fbar_prior_params(*rbf_params)
