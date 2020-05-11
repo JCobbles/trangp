@@ -63,12 +63,13 @@ def plot_kinetics_convergence(k, δ):
         ax.set_title(f'Gene {j}')
     plt.tight_layout()
 
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(6, 4))
     plt.plot(δ)
     ax.set_title('δ Convergence')
 
 
 def plot_genes(titles, m_preds, data, num_hpd=20):
+    num_hpd = max(num_hpd, 20)
     plt.figure(figsize=(14, 17))
     plt.suptitle('Genes')
     num_genes = m_preds[0].shape[0]
@@ -79,11 +80,11 @@ def plot_genes(titles, m_preds, data, num_hpd=20):
         plt.scatter(data.common_indices, data.m_obs[j], marker='x', label='Observed')
         # plt.errorbar([n*10+n for n in range(7)], Y[j], 2*np.sqrt(Y_var[j]), fmt='none', capsize=5)
 
-        for i in range(1, num_hpd):
+        for i in range(1, 20):
             plt.plot(m_preds[-i][j,:], color='grey', alpha=0.5)
             
         # HPD:
-        bounds = arviz.hpd(m_preds[:, j,:], credible_interval=0.95)
+        bounds = arviz.hpd(m_preds[-num_hpd:, j,:], credible_interval=0.95)
         plt.fill_between(np.arange(N_p), bounds[:, 0], bounds[:, 1], color='grey', alpha=0.3, label='95% credibility interval')
 
         plt.xticks(np.arange(N_p)[data.common_indices.numpy()])
@@ -97,7 +98,7 @@ def plot_tf(data, f_samples, plot_barenco=True):
     τ = data.τ
     common_indices = data.common_indices.numpy()
     num_tfs = data.f_obs.shape[0]
-    fig = plt.figure(figsize=(13, int(7*np.round(num_tfs/2))))
+    fig = plt.figure(figsize=(13, 7*np.ceil(num_tfs/2)))
     plt.suptitle('Transcription Factors')
 
     # if 'σ2_f' in model.params._fields:
@@ -151,20 +152,21 @@ def generate_report(data,
                     gene_names=None,
                     num_avg=20,
                     plot_barenco=True,
-                    true_k=None):
+                    true_k=None,
+                    num_hpd=20):
 
     if gene_names is None:
         gene_names = np.arange(data.m_obs.shape[0])
     plot_tf(data, f_samples, plot_barenco=plot_barenco)
 
-    plot_genes(gene_names, m_preds, data, num_hpd=20)
+    plot_genes(gene_names, m_preds, data, num_hpd=num_hpd)
 
     plot_kinetics_convergence(k_samples, δ_samples)
 
     plot_kinetics(gene_names, k_samples, true_k=true_k,
                   num_avg=num_avg, plot_barenco=plot_barenco)
                   
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(10, 4))
     plotnum = 0
     for name, param in (zip(['L', 'V'], rbf_param_samples)):
         ax = plt.subplot(221+plotnum)
