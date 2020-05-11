@@ -130,21 +130,25 @@ class FKernel(MetropolisKernel):
         # MH
         rbf_params = (all_states[self.state_indices['rbf_params']][0], all_states[self.state_indices['rbf_params']][1])
         m, K = self.fbar_prior_params(*rbf_params)
-        invKsigmaK = tf.matmul(tf.linalg.inv(K+tf.linalg.diag(self.h_f)), K) # (C_i + hI)C_i
-        L = jitter_cholesky(K-tf.matmul(K, invKsigmaK))
-        c_mu = tf.matmul(z_i, invKsigmaK)
-        fstar = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
+        for i in range(self.num_tfs):
+            invKsigmaK = tf.matmul(tf.linalg.inv(K[i]+tf.linalg.diag(self.h_f)), K[i]) # (C_i + hI)C_i
+            L = jitter_cholesky(K[i]-tf.matmul(K[i], invKsigmaK))
+            c_mu = tf.matmul(z_i[i, None], invKsigmaK)
+            fstar_i = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
+            mask = np.zeros((self.num_tfs, 1), dtype='float64')
+            mask[i] = 1
+            fstar = (1-mask) * fbar + mask * fstar_i
+            new_prob = self.calculate_probability(fstar, all_states)
+            old_prob = self.calculate_probability(fbar, all_states)
+            #previous_kernel_results.target_log_prob #tf.reduce_sum(old_m_likelihood) + old_f_likelihood
 
-        new_prob = self.calculate_probability(fstar, all_states)
-        old_prob = previous_kernel_results.target_log_prob #tf.reduce_sum(old_m_likelihood) + old_f_likelihood
-
-        is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
-        
-        prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
+            is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
+            
+            prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
 
 
-        fbar = tf.cond(tf.equal(is_accepted, tf.constant(False)),
-                        lambda:fbar, lambda:fstar)
+            fbar = tf.cond(tf.equal(is_accepted, tf.constant(False)),
+                            lambda:fbar, lambda:fstar)
 
         return fbar, GenericResults(prob, is_accepted[0]) # TODO for multiple TFs
     
@@ -165,7 +169,7 @@ class FKernel(MetropolisKernel):
     def bootstrap_results(self, init_state, all_states):
         prob = self.calculate_probability(init_state, all_states)
 
-        return GenericResults(prob, True) #TODO automatically adjust
+        return GenericResults(prob, True)
     
     def is_calibrated(self):
         return True
