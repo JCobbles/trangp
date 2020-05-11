@@ -8,7 +8,7 @@ from tensorflow_probability import distributions as tfd
 from reggae.mcmc import MetropolisHastings, Parameter, MetropolisKernel
 from reggae.models.results import GenericResults
 from reggae.data_loaders import DataHolder
-from ..utilities import get_rbf_dist, exp, mult, jitter_cholesky, logit
+from ..utilities import rotate, get_rbf_dist, exp, mult, jitter_cholesky, logit
 
 import numpy as np
 from scipy.special import expit
@@ -16,9 +16,10 @@ from scipy.special import expit
 f64 = np.float64
 
 class Options():
-    def __init__(self, preprocessing_variance=True, tf_mrna_present=True):
+    def __init__(self, preprocessing_variance=True, tf_mrna_present=True, delays=False):
         self.preprocessing_variance = preprocessing_variance
         self.tf_mrna_present = tf_mrna_present
+        self.delays = delays
 
 
 class TranscriptionLikelihood():
@@ -29,33 +30,44 @@ class TranscriptionLikelihood():
         self.num_genes = data.m_obs.shape[0]
         self.num_tfs = data.f_obs.shape[0]
 
-    def calculate_protein(self, fbar, δbar): # Calculate p_i vector
+    def calculate_protein(self, fbar, δbar, Δbar=None): # Calculate p_i vector
         τ = self.data.τ
         f_i = tfm.log(1+tfm.exp(fbar))
         δ_i = tf.reshape(logit(δbar), (-1, 1))
-        Δ = τ[1]-τ[0]
+        if self.options.delays:
+            # Add delay
+            Δ = logit(Δbar)
+            Δ = tf.cast(tfm.round(Δ), 'int32')
+            # tf.print('adding delay', Δ)
+            f_i = rotate(f_i, -Δ)
+            mask = ~tf.sequence_mask(Δ, f_i.shape[1])
+            f_i = tf.where(mask, f_i, 0)
+            # print(f_i)
+
+        # Approximate integral (trapezoid rule)
+        resolution = τ[1]-τ[0]
         sum_term = tfm.multiply(tfm.exp(δ_i*τ), f_i)
-        p_i = tf.concat([tf.zeros((self.num_tfs, 1), dtype='float64'),
-                         0.5*Δ*tfm.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) # Trapezoid rule
+        p_i = tf.concat([tf.zeros((self.num_tfs, 1), dtype='float64'), 
+                         0.5*resolution*tfm.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) 
         p_i = tfm.multiply(tfm.exp(-δ_i*τ), p_i)
         return p_i
 
     @tf.function
-    def predict_m(self, kbar, δbar, w, fbar, w_0):
+    def predict_m(self, kbar, δbar, w, fbar, w_0, Δbar=None):
         # Take relevant parameters out of log-space
         a_j, b_j, d_j, s_j = (tf.reshape(logit(kbar[:, i]), (-1, 1)) for i in range(4))
         τ = self.data.τ
         N_p = self.data.τ.shape[0]
 
-        p_i = self.calculate_protein(fbar, δbar)
+        p_i = self.calculate_protein(fbar, δbar, Δbar)
         # Calculate m_pred
-        Δ = τ[1]-τ[0]
+        resolution = τ[1]-τ[0]
         integrals = tf.zeros((self.num_genes, N_p))
         interactions =  tf.matmul(w, tfm.log(p_i+1e-100)) + w_0[:, None]
         G = tfm.sigmoid(interactions) # TF Activation Function (sigmoid)
         sum_term = G * tfm.exp(d_j*τ)
-        integrals = tf.concat([tf.zeros((self.num_genes, 1), dtype='float64'), 
-                               0.5*Δ*tfm.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) # Trapezoid rule
+        integrals = tf.concat([tf.zeros((self.num_genes, 1), dtype='float64'), # Trapezoid rule
+                               0.5*resolution*tfm.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) 
 
         exp_dt = tfm.exp(-d_j*τ)
         integrals = tfm.multiply(exp_dt, integrals)
@@ -69,7 +81,8 @@ class TranscriptionLikelihood():
               kbar=None, 
               w=None,
               w_0=None,
-              σ2_m=None, return_sq_diff=False):
+              σ2_m=None, 
+              Δbar=None, return_sq_diff=False):
         '''
         Computes likelihood of the genes.
         If any of the optional args are None, they are replaced by their 
@@ -84,16 +97,17 @@ class TranscriptionLikelihood():
         # w = all_states[state_indices['w']][0] if w is None else w
         # w_0 = all_states[state_indices['w']][1] if w_0 is None else w_0
         σ2_m = all_states[state_indices['σ2_m']] if σ2_m is None else σ2_m
-
-        lik, sq_diff = self._genes(δbar, fbar, kbar, w, w_0, σ2_m)
+        if self.options.delays:
+            Δbar = all_states[state_indices['Δbar']] if Δbar is None else Δbar
+        lik, sq_diff = self._genes(δbar, fbar, kbar, w, w_0, σ2_m, Δbar)
 
         if return_sq_diff:
             return lik, sq_diff
         return lik
 
     @tf.function
-    def _genes(self, δbar, fbar, kbar, w, w_0, σ2_m):
-        m_pred = self.predict_m(kbar, δbar, w, fbar, w_0)
+    def _genes(self, δbar, fbar, kbar, w, w_0, σ2_m, Δbar=None):
+        m_pred = self.predict_m(kbar, δbar, w, fbar, w_0, Δbar)
 
         sq_diff = tfm.square(self.data.m_obs - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
         variance = tf.reshape(σ2_m, (-1, 1))

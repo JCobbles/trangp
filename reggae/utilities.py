@@ -93,7 +93,28 @@ class LogisticNormal():
         log_prob = self.dist.log_prob(x)
         log_prob = tf.where(
             tf.math.is_nan(log_prob),
-            -1e3*tf.ones([], log_prob.dtype),
+            -1e2*tf.ones([], log_prob.dtype),
             log_prob)
 
         return log_prob
+
+def rotate(matrix, shifts):
+    """"requested rotate function - assumes matrix shape is mxn and shifts shape is m"""
+
+    # get shape of the input matrix
+    shape = tf.shape(matrix)
+
+    # compute and stack the meshgrid to get the index matrix of shape (2,m,n)
+    ind = tf.stack(tf.meshgrid(tf.range(shape[0]), tf.range(shape[1]), indexing='ij'))
+    # reshape it to (m,n,2)
+    ind = tf.transpose(ind, [1,2,0])
+
+    # add the value from shifts to the corresponding row and devide modulo shape[1]
+    # this will effectively introduce the desired shift, but at the level of indices
+    shifted_ind = tfm.mod(tf.transpose(tf.transpose(ind[:,:,1]) + shifts), shape[1])
+
+    # convert the shifted indices to the right shape
+    new_ind = tf.transpose(tf.stack([ind[:,:,0], shifted_ind]) , [1,2,0]) 
+
+    # return the resliced tensor
+    return tf.gather_nd(matrix, new_ind)
