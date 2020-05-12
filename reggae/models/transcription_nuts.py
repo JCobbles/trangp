@@ -42,19 +42,20 @@ class TranscriptionLikelihood():
         # Approximate integral (trapezoid rule)
         resolution = τ[1]-τ[0]
         sum_term = tfm.multiply(tfm.exp(δ_i*τ), f_i)
-        p_i = tf.concat([tf.zeros((self.num_tfs, 1), dtype='float64'), 
+        integrals = tf.concat([tf.zeros((self.num_tfs, 1), dtype='float64'), 
                          0.5*resolution*tfm.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) 
-        p_i = tfm.multiply(tfm.exp(-δ_i*τ), p_i)
+        exp_δt = tfm.exp(-δ_i*τ)
+        p_i = a_i * exp_δt + exp_δt * integrals
         return p_i
 
     @tf.function
-    def predict_m(self, kbar, δbar, w, fbar, w_0, Δbar=None):
+    def predict_m(self, kbar, k_fbar, w, fbar, w_0, Δ=None):
         # Take relevant parameters out of log-space
         a_j, b_j, d_j, s_j = (tf.reshape(logit(kbar[:, i]), (-1, 1)) for i in range(4))
         τ = self.data.τ
         N_p = self.data.τ.shape[0]
 
-        p_i = self.calculate_protein(fbar, δbar, Δbar)
+        p_i = self.calculate_protein(fbar, k_fbar, Δ)
         # Calculate m_pred
         resolution = τ[1]-τ[0]
         integrals = tf.zeros((self.num_genes, N_p))
