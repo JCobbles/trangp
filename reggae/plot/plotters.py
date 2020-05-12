@@ -47,7 +47,7 @@ def plot_kinetics(labels, k, plot_barenco=False, true_k=None, num_avg=50):
         plt.legend()
 
 
-def plot_kinetics_convergence(k, δ):
+def plot_kinetics_convergence(k, k_f):
     num_genes = k.shape[1]
     labels = ['a', 'b', 'd', 's']
     plt.figure(figsize=(14, 14))
@@ -63,10 +63,18 @@ def plot_kinetics_convergence(k, δ):
         ax.set_title(f'Gene {j}')
     plt.tight_layout()
 
-    plt.figure(figsize=(6, 4))
-    for i in range(δ.shape[1]):
-        plt.plot(δ[:, i], label=f'TF {i}')
-    plt.title('δ Convergence')
+    num_tfs = k_f.shape[1]
+    plt.figure(figsize=(6, 4*np.ceil(num_tfs/2)))
+    labels = ['a', 'δ']
+    horizontal_subplots = 21 if num_tfs > 1 else 11
+    for i in range(num_tfs):
+        ax = plt.subplot(num_tfs*100 + horizontal_subplots + i)
+        ax.set_title(f'TF {i}')
+        for k in range(2):
+            plt.plot(k_f[:, i, k], label=labels[k])
+
+    plt.legend()
+    plt.title('Translation Convergence')
 
 
 def plot_genes(titles, m_preds, data, num_hpd=20):
