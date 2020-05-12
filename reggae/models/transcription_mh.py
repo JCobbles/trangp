@@ -14,9 +14,10 @@ from scipy.special import expit
 f64 = np.float64
 
 class Options():
-    def __init__(self, preprocessing_variance=True, tf_mrna_present=True):
+    def __init__(self, preprocessing_variance=True, tf_mrna_present=True, delays=False):
         self.preprocessing_variance = preprocessing_variance
         self.tf_mrna_present = tf_mrna_present
+        self.delays = delays
 
 class TranscriptionLikelihood():
     def __init__(self, data: DataHolder, options: Options):

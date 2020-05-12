@@ -89,9 +89,9 @@ class TranscriptionLikelihood():
         current value in all_states.
         '''
 
-        δbar = all_states[state_indices['δbar']] if δbar is None else δbar
+        δbar = all_states[state_indices['kinetics']][1] if δbar is None else δbar
         fbar = all_states[state_indices['fbar']] if fbar is None else fbar
-        kbar = all_states[state_indices['kbar']] if kbar is None else kbar
+        kbar = all_states[state_indices['kinetics']][0] if kbar is None else kbar
         w = 1*tf.ones((self.num_genes, self.num_tfs), dtype='float64') # TODO
         w_0 = tf.zeros(self.num_genes, dtype='float64') # TODO
         # w = all_states[state_indices['w']][0] if w is None else w

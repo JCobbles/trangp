@@ -24,7 +24,8 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
         self.send_all_states = send_all_states
         self.num_kernels = len(kernels)
         self.one_step_receives_state = [len(signature(k.one_step).parameters)>2 for k in kernels]
-        
+        super().__init__()
+
     def one_step(self, current_state, previous_kernel_results):
 #         print('running', current_state, previous_kernel_results)
         new_state = list()
@@ -35,26 +36,42 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
                 wrapped_state_i = current_state[i]
                 if type(wrapped_state_i) is not list:
                     wrapped_state_i = [wrapped_state_i]
+
                 previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
                     target_log_prob=self.kernels[i].target_log_prob_fn(current_state)(*wrapped_state_i))
 
+            # if type(wrapped_state_i) is list:
+            #     self.kernels[i].all_states_hack = [tf.identity(res) for res in current_state]
+            # else:
             self.kernels[i].all_states_hack = current_state
-            if self.one_step_receives_state[i]:
-                result_state, kernel_results = self.kernels[i].one_step(
-                    current_state[i], previous_kernel_results.inner_results[i], current_state)
-            else:
-                result_state, kernel_results = self.kernels[i].one_step(
-                    current_state[i], previous_kernel_results.inner_results[i])
 
+            # if hasattr(self.kernels[i], 'inner_kernel'):
+            #     self.kernels[i].inner_kernel.all_states_hack = current_state
+            args = []
+            try:
+                if self.one_step_receives_state[i]:
+                    args = [current_state]
+                # state_chained = tf.expand_dims(current_state[i], 0)
+                # print(state_chained)
+                result_state, kernel_results = self.kernels[i].one_step(
+                    current_state[i], previous_kernel_results.inner_results[i], *args)
+            except Exception as e:
+                tf.print('Failed at ', i, self.kernels[i], current_state)
+                raise e
 #                 print(result_state, kernel_results)
 
-            new_state.append(result_state)
-#             if i == 4:
-#                 tf.print(kernel_results)
+            # if i == 3:
+            #     tf.print(result_state, kernel_results.is_accepted)
+            if type(result_state) is list:
+                new_state.append([tf.identity(res) for res in result_state])
+            else:
+                new_state.append(result_state)
+
+            is_accepted.append(kernel_results.is_accepted)
             inner_results.append(kernel_results)
         
         
-        return new_state, MixedKernelResults(inner_results)
+        return new_state, MixedKernelResults(inner_results, is_accepted)
 
     def bootstrap_results(self, init_state):
         """Returns an object with the same type as returned by `one_step(...)[1]`.
@@ -66,16 +83,22 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
         `Tensor`s representing internal calculations made within this function.
         """
         inner_kernels_bootstraps = list()
+        is_accepted = list()
         for i in range(self.num_kernels):
             self.kernels[i].all_states_hack = init_state
-            if self.one_step_receives_state[i]:
-                inner_kernels_bootstraps.append(
-                    self.kernels[i].bootstrap_results(init_state[i], init_state))
-            else:
-                inner_kernels_bootstraps.append(
-                    self.kernels[i].bootstrap_results(init_state[i]))
 
-        return MixedKernelResults(inner_kernels_bootstraps)
+            if hasattr(self.kernels[i], 'inner_kernel'):
+                self.kernels[i].inner_kernel.all_states_hack = init_state
+            if self.one_step_receives_state[i]:
+                results = self.kernels[i].bootstrap_results(init_state[i], init_state)
+                inner_kernels_bootstraps.append(results)
+                    
+            else:
+                results = self.kernels[i].bootstrap_results(init_state[i])
+                inner_kernels_bootstraps.append(results)
+            is_accepted.append(results.is_accepted)
+
+        return MixedKernelResults(inner_kernels_bootstraps, is_accepted)
 
     def is_calibrated(self):
         return True
@@ -102,25 +125,30 @@ class FKernel(MetropolisKernel):
         old_probs = list()
         # TODO check works with multiple TFs
         # Gibbs step
-        z_i = tf.reshape(tfd.MultivariateNormalDiag(fbar, self.h_f).sample(), (1, -1))
+        z_i = tfd.MultivariateNormalDiag(fbar, self.h_f).sample()
+
         # MH
         rbf_params = (all_states[self.state_indices['rbf_params']][0], all_states[self.state_indices['rbf_params']][1])
         m, K = self.fbar_prior_params(*rbf_params)
-        invKsigmaK = tf.matmul(tf.linalg.inv(K+tf.linalg.diag(self.h_f)), K) # (C_i + hI)C_i
-        L = jitter_cholesky(K-tf.matmul(K, invKsigmaK))
-        c_mu = tf.matmul(z_i, invKsigmaK)
-        fstar = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
+        for i in range(self.num_tfs):
+            invKsigmaK = tf.matmul(tf.linalg.inv(K[i]+tf.linalg.diag(self.h_f)), K[i]) # (C_i + hI)C_i
+            L = jitter_cholesky(K[i]-tf.matmul(K[i], invKsigmaK))
+            c_mu = tf.matmul(z_i[i, None], invKsigmaK)
+            fstar_i = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
+            mask = np.zeros((self.num_tfs, 1), dtype='float64')
+            mask[i] = 1
+            fstar = (1-mask) * fbar + mask * fstar_i
+            new_prob = self.calculate_probability(fstar, all_states)
+            old_prob = self.calculate_probability(fbar, all_states)
+            #previous_kernel_results.target_log_prob #tf.reduce_sum(old_m_likelihood) + old_f_likelihood
 
-        new_prob = self.calculate_probability(fstar, all_states)
-        old_prob = previous_kernel_results.target_log_prob #tf.reduce_sum(old_m_likelihood) + old_f_likelihood
-
-        is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
-        
-        prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
+            is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
+            
+            prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
 
 
-        fbar = tf.cond(tf.equal(is_accepted, tf.constant(False)),
-                        lambda:fbar, lambda:fstar)
+            fbar = tf.cond(tf.equal(is_accepted, tf.constant(False)),
+                            lambda:fbar, lambda:fstar)
 
         return fbar, GenericResults(prob, is_accepted[0]) # TODO for multiple TFs
     
@@ -141,7 +169,7 @@ class FKernel(MetropolisKernel):
     def bootstrap_results(self, init_state, all_states):
         prob = self.calculate_probability(init_state, all_states)
 
-        return GenericResults(prob, True) #TODO automatically adjust
+        return GenericResults(prob, True)
     
     def is_calibrated(self):
         return True
