@@ -6,9 +6,9 @@ from reggae.data_loaders import scaled_barenco_data
 def plot_kinetics(labels, k, plot_barenco=False, true_k=None, num_avg=50):
     k_latest = np.mean(k[-num_avg:], axis=0)
     num_genes = k.shape[1]
-    plt.suptitle('Transcription ODE Kinetic Parameters')
 
     plt.figure()
+    plt.suptitle('Transcription ODE Kinetic Parameters')
     A = k_latest[:, 0]
     plt.title('Initial Conditions')
     for j in range(num_genes):
@@ -64,8 +64,9 @@ def plot_kinetics_convergence(k, δ):
     plt.tight_layout()
 
     plt.figure(figsize=(6, 4))
-    plt.plot(δ)
-    ax.set_title('δ Convergence')
+    for i in range(δ.shape[1]):
+        plt.plot(δ[:, i], label=f'TF {i}')
+    plt.title('δ Convergence')
 
 
 def plot_genes(titles, m_preds, data, num_hpd=20):
@@ -93,7 +94,7 @@ def plot_genes(titles, m_preds, data, num_hpd=20):
         plt.legend()
     plt.tight_layout()
 
-def plot_tf(data, f_samples, plot_barenco=True):
+def plot_tf(data, f_samples, num_hpd=20, plot_barenco=True):
     t = data.t
     τ = data.τ
     common_indices = data.common_indices.numpy()
@@ -109,7 +110,6 @@ def plot_tf(data, f_samples, plot_barenco=True):
     #     σ2_f = σ2_f_pre
     horizontal_subplots = 21 if num_tfs > 1 else 11
     for i in range(num_tfs):
-        bounds = arviz.hpd(f_samples[:,i,:], credible_interval=0.95)
         
         plt.subplot(num_tfs*100+horizontal_subplots+i)
         for s in range(1,20):
@@ -123,6 +123,8 @@ def plot_tf(data, f_samples, plot_barenco=True):
 
         plt.scatter(τ[common_indices], data.f_obs[i], marker='x', s=70, linewidth=3, label='Observed')
 
+        # HPD:
+        bounds = arviz.hpd(f_samples[-num_hpd:,i,:], credible_interval=0.95)
         plt.fill_between(τ, bounds[:, 0], bounds[:, 1], color='grey', alpha=0.3, label='95% credibility interval')
         plt.xticks(t)
         fig.axes[0].set_xticklabels(t)
