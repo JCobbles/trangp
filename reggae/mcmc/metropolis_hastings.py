@@ -18,6 +18,9 @@ class MetropolisKernel(tfp.mcmc.TransitionKernel):
     #         alpha = alpha.numpy()
     #     return not np.isnan(alpha) and random.random() < min(1, alpha)
 
+    
+    def is_calibrated(self):
+        return True
 
 class MetropolisHastings():
     def __init__(self, params):

@@ -45,8 +45,6 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
             # else:
             self.kernels[i].all_states_hack = current_state
 
-            # if hasattr(self.kernels[i], 'inner_kernel'):
-            #     self.kernels[i].inner_kernel.all_states_hack = current_state
             args = []
             try:
                 if self.one_step_receives_state[i]:
