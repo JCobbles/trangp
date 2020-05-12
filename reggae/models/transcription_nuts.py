@@ -26,14 +26,13 @@ class TranscriptionLikelihood():
         self.num_genes = data.m_obs.shape[0]
         self.num_tfs = data.f_obs.shape[0]
 
-    def calculate_protein(self, fbar, δbar, Δbar=None): # Calculate p_i vector
+    def calculate_protein(self, fbar, k_fbar, Δ=None): # Calculate p_i vector
         τ = self.data.τ
         f_i = tfm.log(1+tfm.exp(fbar))
-        δ_i = tf.reshape(logit(δbar), (-1, 1))
+        a_i, δ_i = (tf.reshape(logit(k_fbar[:, i]), (-1, 1)) for i in range(2))
         if self.options.delays:
             # Add delay
-            Δ = logit(Δbar)
-            Δ = tf.cast(tfm.round(Δ), 'int32')
+            Δ = tf.cast(Δ, 'int32')
             # tf.print('adding delay', Δ)
             f_i = rotate(f_i, -Δ)
             mask = ~tf.sequence_mask(Δ, f_i.shape[1])

@@ -174,6 +174,88 @@ class FKernel(MetropolisKernel):
     def is_calibrated(self):
         return True
 
+class DeltaKernel(tfp.mcmc.TransitionKernel):
+    def __init__(self, likelihood, lower, upper, state_indices):
+        self.likelihood = likelihood
+        self.state_indices = state_indices
+        self.lower = lower
+        self.upper = upper
+        
+    def one_step(self, current_state, previous_kernel_results, all_states):
+        num_tfs = current_state.shape[0]
+        new_state = current_state
+        Δrange = np.arange(self.lower, self.upper+1, dtype='float64')
+        Δrange_tf = tf.range(self.lower, self.upper+1, dtype='float64')
+        for i in range(num_tfs):
+            # Generate normalised cumulative distribution
+            cumsum = list()
+            mask = np.zeros((num_tfs, ), dtype='float64')
+            mask[i] = 1
+            
+            for j, Δ in enumerate(Δrange):
+                test_state = (1-mask) * new_state + mask * Δ
+
+                if j == 0:
+                    cumsum.append(tf.reduce_sum(self.likelihood.genes(
+                        all_states=all_states, 
+                        state_indices=self.state_indices,
+                        Δ=test_state,
+                    )))# + tf.reduce_sum(self.params.Δbar.prior.log_prob(logit(Δbar)))
+                else:
+                    cumsum.append(cumsum[j-1] + tf.reduce_sum(self.likelihood.genes(
+                        all_states=all_states, 
+                        state_indices=self.state_indices,
+                        Δ=test_state,
+                    )))# + tf.reduce_sum(self.params.Δbar.prior.log_prob(logit(Δbar)))
+            cumsum = tf.stack(cumsum)
+            cumsum /= cumsum[-1]
+#             tf.print('noramlised', cumsum)
+            u = np.random.uniform()
+            index = tf.where(cumsum == tf.reduce_min(cumsum[(cumsum - u) > 0]))
+#             tf.print(index[0][0])
+#             tf.print('chosen', Δrange_tf[index[0][0]])
+            chosen = Δrange_tf[index[0][0]]
+            new_state = (1-mask) * new_state + mask * chosen
+            
+#         tf.print('final chosen state', new_state)
+
+        return new_state, GenericResults(list(), True)
+
+    def bootstrap_results(self, init_state, all_states):
+
+        return GenericResults(list(), True)
+    
+    def is_calibrated(self):
+        return True
+
+class GibbsKernel(tfp.mcmc.TransitionKernel):
+    
+    def __init__(self, options):
+        self.options = options
+    def one_step(self, current_state, previous_kernel_results, all_states):
+        # Prior parameters
+        α = params.σ2_m.prior.concentration
+        β = params.σ2_m.prior.scale
+        # Conditional posterior of inv gamma parameters:
+        α_post = α + 0.5*self.N_m
+        β_post = β + 0.5*np.sum(sq_diff_m)
+        # print(α.shape, sq_diff.shape)
+        # print('val', β_post.shape, params.σ2_m.value)
+        params.σ2_m.value = np.repeat(tfd.InverseGamma(α_post, β_post).sample(), self.num_genes)
+        self.acceptance_rates['σ2_m'] += 1
+
+        if self.options.tf_mrna_present: # (Step 5)
+            # Prior parameters
+            α = params.σ2_f.prior.concentration
+            β = params.σ2_f.prior.scale
+            # Conditional posterior of inv gamma parameters:
+            α_post = α + 0.5*self.N_m
+            β_post = β + 0.5*np.sum(sq_diff_f)
+            # print(α.shape, sq_diff.shape)
+            # print('val', β_post.shape, params.σ2_m.value)
+            params.σ2_f.value = np.repeat(tfd.InverseGamma(α_post, β_post).sample(), self.num_tfs)
+            self.acceptance_rates['σ2_f'] += 1
+
 class KbarKernel(MetropolisKernel):
     def __init__(self, likelihood, prop_dist, prior_dist, num_genes, state_indices):
         self.prop_dist = prop_dist
