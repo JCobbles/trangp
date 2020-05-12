@@ -1,26 +1,22 @@
-from collections import namedtuple
+import collections
 
 import tensorflow as tf
 from tensorflow import math as tfm
+import tensorflow_probability as tfp
 from tensorflow_probability import bijectors as tfb
 from tensorflow_probability import distributions as tfd
 
 from reggae.mcmc import MetropolisHastings, Parameter, MetropolisKernel
 from reggae.models.results import GenericResults
+from reggae.models import Options
+from reggae.models.kernels import FKernel, MixedKernel, DeltaKernel, GibbsKernel
 from reggae.data_loaders import DataHolder
-from ..utilities import rotate, get_rbf_dist, exp, mult, jitter_cholesky, logit
+from reggae.utilities import rotate, get_rbf_dist, jitter_cholesky, logit, LogisticNormal
 
 import numpy as np
 from scipy.special import expit
 
 f64 = np.float64
-
-class Options():
-    def __init__(self, preprocessing_variance=True, tf_mrna_present=True, delays=False):
-        self.preprocessing_variance = preprocessing_variance
-        self.tf_mrna_present = tf_mrna_present
-        self.delays = delays
-
 
 class TranscriptionLikelihood():
     def __init__(self, data: DataHolder, options: Options):
@@ -76,38 +72,38 @@ class TranscriptionLikelihood():
         return m_pred
 
     def genes(self, all_states=None, state_indices=None,
-              δbar=None,
+              k_fbar=None,
               fbar=None, 
               kbar=None, 
               w=None,
               w_0=None,
               σ2_m=None, 
-              Δbar=None, return_sq_diff=False):
+              Δ=None, return_sq_diff=False):
         '''
         Computes likelihood of the genes.
         If any of the optional args are None, they are replaced by their 
         current value in all_states.
         '''
 
-        δbar = all_states[state_indices['δbar']] if δbar is None else δbar
+        k_fbar = all_states[state_indices['kinetics']][1] if k_fbar is None else k_fbar
         fbar = all_states[state_indices['fbar']] if fbar is None else fbar
-        kbar = all_states[state_indices['kbar']] if kbar is None else kbar
+        kbar = all_states[state_indices['kinetics']][0] if kbar is None else kbar
         w = 1*tf.ones((self.num_genes, self.num_tfs), dtype='float64') # TODO
         w_0 = tf.zeros(self.num_genes, dtype='float64') # TODO
         # w = all_states[state_indices['w']][0] if w is None else w
         # w_0 = all_states[state_indices['w']][1] if w_0 is None else w_0
         σ2_m = all_states[state_indices['σ2_m']] if σ2_m is None else σ2_m
         if self.options.delays:
-            Δbar = all_states[state_indices['Δbar']] if Δbar is None else Δbar
-        lik, sq_diff = self._genes(δbar, fbar, kbar, w, w_0, σ2_m, Δbar)
+            Δ = all_states[state_indices['Δ']] if Δ is None else Δ
+        lik, sq_diff = self._genes(k_fbar, fbar, kbar, w, w_0, σ2_m, Δ)
 
         if return_sq_diff:
             return lik, sq_diff
         return lik
 
     @tf.function
-    def _genes(self, δbar, fbar, kbar, w, w_0, σ2_m, Δbar=None):
-        m_pred = self.predict_m(kbar, δbar, w, fbar, w_0, Δbar)
+    def _genes(self, k_fbar, fbar, kbar, w, w_0, σ2_m, Δ=None):
+        m_pred = self.predict_m(kbar, k_fbar, w, fbar, w_0, Δ)
 
         sq_diff = tfm.square(self.data.m_obs - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
         variance = tf.reshape(σ2_m, (-1, 1))
