@@ -11,7 +11,7 @@ from reggae.models.results import GenericResults
 from reggae.models import Options
 from reggae.models.kernels import FKernel, MixedKernel, DeltaKernel, GibbsKernel
 from reggae.data_loaders import DataHolder
-from reggae.utilities import rotate, get_rbf_dist, jitter_cholesky, logit, LogisticNormal
+from reggae.utilities import rotate, get_rbf_dist, jitter_cholesky, logit, logistic, LogisticNormal
 
 import numpy as np
 from scipy.special import expit
@@ -33,7 +33,6 @@ class TranscriptionLikelihood():
         if self.options.delays:
             # Add delay
             Δ = tf.cast(Δ, 'int32')
-            # tf.print('adding delay', Δ)
             f_i = rotate(f_i, -Δ)
             mask = ~tf.sequence_mask(Δ, f_i.shape[1])
             f_i = tf.where(mask, f_i, 0)
@@ -106,7 +105,7 @@ class TranscriptionLikelihood():
         m_pred = self.predict_m(kbar, k_fbar, w, fbar, w_0, Δ)
 
         sq_diff = tfm.square(self.data.m_obs - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
-        variance = tf.reshape(σ2_m, (-1, 1))
+        variance = logit(tf.reshape(σ2_m, (-1, 1)))
         if self.preprocessing_variance:
             variance = variance + self.data.σ2_m_pre # add PUMA variance
 #         print(variance.shape, sq_diff.shape)
@@ -226,7 +225,6 @@ class TranscriptionMixedSampler():
                 l2 = logit(l2bar, nan_replace=self.params.L.prior.b)
 
                 new_prob = tf.reduce_sum(self.params.fbar.prior(all_states[self.state_indices['fbar']], vbar, l2bar))
-#                 tf.print(new_prob)
                 new_prob += self.params.V.prior.log_prob(v)
                 new_prob += self.params.L.prior.log_prob(l2)
 #                 tf.print('new prob', new_prob)
@@ -247,23 +245,22 @@ class TranscriptionMixedSampler():
         k_fbar = Parameter('k_fbar', LogisticNormal(0.1, 3), 0.7*tf.ones((self.num_tfs,2), dtype='float64'))
 
         # White noise for genes
-        if not options.preprocessing_variance:
-            σ2_f_kernel = GibbsKernel(self.likelihood, 
-                      self.num_tfs, self.num_genes, 
-                      self.state_indices,
-                      0.2*tf.ones(N_p, dtype='float64'))
+        # if not options.preprocessing_variance:
+        #     σ2_f_kernel = GibbsKernel(self.options)
+
         def σ2_m_log_prob(all_states):
             def σ2_m_log_prob_fn(σ2_mstar):
-#                 tf.print('star:',σ2_mstar)
+                # tf.print('starr:', logit(σ2_mstar))
                 new_prob = self.likelihood.genes(
                     all_states=all_states, 
                     state_indices=self.state_indices,
                     σ2_m=σ2_mstar 
                 ) + self.params.σ2_m.prior.log_prob(logit(σ2_mstar))
-#                 tf.print('prob', tf.reduce_sum(new_prob))
+                # tf.print('prob', tf.reduce_sum(new_prob))
                 return tf.reduce_sum(new_prob)                
             return σ2_m_log_prob_fn
-        σ2_m = Parameter('σ2_m', LogisticNormal(f64(1e-5), f64(max(np.var(data.f_obs, axis=1)))), 1e-4*tf.ones(self.num_genes, dtype='float64'), 
+        σ2_m = Parameter('σ2_m', LogisticNormal(f64(1e-5), f64(max(np.var(data.f_obs, axis=1)))), 
+                         logistic(f64(5e-3))*tf.ones(self.num_genes, dtype='float64'), 
                          hmc_log_prob=σ2_m_log_prob, requires_all_states=True, step_size=logistic_step_size)
         # Transcription kinetic parameters
         def constrain_kbar(kbar, gene):
@@ -303,7 +300,7 @@ class TranscriptionMixedSampler():
                              step_size=logistic_step_size, requires_all_states=True)
 
 
-        delta_kernel = DeltaKernel(self.likelihood, 0, 10, self.state_indices)
+        delta_kernel = DeltaKernel(self.likelihood, 0, 10, self.state_indices, tfd.Exponential(f64(0.3)))
         Δ = Parameter('Δ', tfd.InverseGamma(f64(0.01), f64(0.01)), 0.6*tf.ones(self.num_tfs, dtype='float64'),
                         kernel=delta_kernel, requires_all_states=False)
         
@@ -326,7 +323,6 @@ class TranscriptionMixedSampler():
     def fbar_prior(self, fbar, v, l2):
         m, K = self.fbar_prior_params(v, l2)
 #         tf.print(fbar[0][:6])
-#         tf.print(v, l2)
         jitter = tf.linalg.diag(1e-8 *tf.ones(self.N_p, dtype='float64'))
         prob = 0
         for i in range(self.num_tfs):

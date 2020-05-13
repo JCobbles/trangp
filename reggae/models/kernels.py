@@ -5,7 +5,7 @@ import tensorflow_probability as tfp
 
 from reggae.mcmc import MetropolisHastings, Parameter, MetropolisKernel
 from reggae.models.results import GenericResults, MixedKernelResults
-from reggae.utilities import get_rbf_dist, exp, mult, jitter_cholesky
+from reggae.utilities import get_rbf_dist, exp, mult, jitter_cholesky, logit
 
 import numpy as np
 
@@ -40,10 +40,14 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
                 previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
                     target_log_prob=self.kernels[i].target_log_prob_fn(current_state)(*wrapped_state_i))
 
-            # if type(wrapped_state_i) is list:
+            # if type(current_state[i]) is list:
             #     self.kernels[i].all_states_hack = [tf.identity(res) for res in current_state]
             # else:
             self.kernels[i].all_states_hack = current_state
+            # if i == 3:
+            #     tf.print('------')
+            #     tf.print(previous_kernel_results.inner_results[i].target_log_prob)
+            #     tf.print('current logit()', logit(current_state[3]))
 
             args = []
             try:
@@ -59,7 +63,8 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
 #                 print(result_state, kernel_results)
 
             # if i == 3:
-            #     tf.print(result_state, kernel_results.is_accepted)
+            #     tf.print(kernel_results.target_log_prob, kernel_results)
+            #     tf.print('=======')
             if type(result_state) is list:
                 new_state.append([tf.identity(res) for res in result_state])
             else:
@@ -158,7 +163,7 @@ class FKernel(MetropolisKernel):
         )
         new_f_likelihood = tf.cond(tf.equal(self.tf_mrna_present, tf.constant(True)), 
                                    lambda:tf.reduce_sum(self.likelihood.tfs(
-                                       1e-4*tf.ones(self.num_tfs, dtype='float64'), # TODO
+                                       1e-6*tf.ones(self.num_tfs, dtype='float64'), # TODO
                                        fstar
                                    )), lambda:f64(0))
         new_prob = tf.reduce_sum(new_m_likelihood) + new_f_likelihood
@@ -173,11 +178,12 @@ class FKernel(MetropolisKernel):
         return True
 
 class DeltaKernel(tfp.mcmc.TransitionKernel):
-    def __init__(self, likelihood, lower, upper, state_indices):
+    def __init__(self, likelihood, lower, upper, state_indices, prior):
         self.likelihood = likelihood
         self.state_indices = state_indices
         self.lower = lower
         self.upper = upper
+        self.prior = prior
         
     def one_step(self, current_state, previous_kernel_results, all_states):
         num_tfs = current_state.shape[0]
@@ -186,32 +192,31 @@ class DeltaKernel(tfp.mcmc.TransitionKernel):
         Δrange_tf = tf.range(self.lower, self.upper+1, dtype='float64')
         for i in range(num_tfs):
             # Generate normalised cumulative distribution
-            cumsum = list()
+            probs = list()
             mask = np.zeros((num_tfs, ), dtype='float64')
             mask[i] = 1
             
             for j, Δ in enumerate(Δrange):
                 test_state = (1-mask) * new_state + mask * Δ
 
-                if j == 0:
-                    cumsum.append(tf.reduce_sum(self.likelihood.genes(
-                        all_states=all_states, 
-                        state_indices=self.state_indices,
-                        Δ=test_state,
-                    )))# + tf.reduce_sum(self.params.Δbar.prior.log_prob(logit(Δbar)))
-                else:
-                    cumsum.append(cumsum[j-1] + tf.reduce_sum(self.likelihood.genes(
-                        all_states=all_states, 
-                        state_indices=self.state_indices,
-                        Δ=test_state,
-                    )))# + tf.reduce_sum(self.params.Δbar.prior.log_prob(logit(Δbar)))
-            cumsum = tf.stack(cumsum)
-            cumsum /= cumsum[-1]
-#             tf.print('noramlised', cumsum)
+                # if j == 0:
+                #     cumsum.append(tf.reduce_sum(self.likelihood.genes(
+                #         all_states=all_states, 
+                #         state_indices=self.state_indices,
+                #         Δ=test_state,
+                #     )) + tf.reduce_sum(self.prior.log_prob(Δ)))
+                # else:
+                probs.append(tf.reduce_sum(self.likelihood.genes(
+                    all_states=all_states, 
+                    state_indices=self.state_indices,
+                    Δ=test_state,
+                )) + tf.reduce_sum(self.prior.log_prob(Δ)))
+            probs =  tf.stack(probs) - tfm.reduce_max(probs)
+            probs = tfm.exp(probs)
+            probs = probs / tfm.reduce_sum(probs)
+            cumsum = tfm.cumsum(probs)
             u = np.random.uniform()
             index = tf.where(cumsum == tf.reduce_min(cumsum[(cumsum - u) > 0]))
-#             tf.print(index[0][0])
-#             tf.print('chosen', Δrange_tf[index[0][0]])
             chosen = Δrange_tf[index[0][0]]
             new_state = (1-mask) * new_state + mask * chosen
             
