@@ -3,47 +3,44 @@ import numpy as np
 import arviz
 from reggae.data_loaders import scaled_barenco_data
 
-def plot_kinetics(labels, k, plot_barenco=False, true_k=None, num_avg=50):
+def plot_kinetics(labels, k, plot_barenco=False, true_k=None, num_avg=50, num_hpd=120):
     k_latest = np.mean(k[-num_avg:], axis=0)
     num_genes = k.shape[1]
+    true_data = None
 
-    plt.figure()
     plt.suptitle('Transcription ODE Kinetic Parameters')
-    A = k_latest[:, 0]
     plt.title('Initial Conditions')
+    hpds = list()
     for j in range(num_genes):
-        plt.bar(np.arange(num_genes), A, width=0.4, tick_label=labels, label='Model')
+        hpds.append(arviz.hpd(k[-num_hpd:, j,:], credible_interval=0.95))
+    hpds = np.array(hpds)
+    hpds = abs(hpds - np.expand_dims(k_latest, 2))
 
-    plt.figure(figsize=(14, 14))
-    B = k_latest[:,1]
-    D = k_latest[:,2]
-    S = k_latest[:,3]
-    data = [B, S, D]
-    true_data = [None, None, None]
-
+    plt.figure(figsize=(10, 14))
     comparison_label = 'True'
     if plot_barenco:
         comparison_label = 'Barenco et al.'
         # From Martino paper ... do a rough rescaling so that the scales match.
         B_barenco = np.array([2.6, 1.5, 0.5, 0.2, 1.35])[[0, 4, 2, 3, 1]]
-        B_barenco = B_barenco/np.mean(B_barenco)*np.mean(B)
+        B_barenco = B_barenco/np.mean(B_barenco)*np.mean(k_latest[:, 1])
         S_barenco = (np.array([3, 0.8, 0.7, 1.8, 0.7])/1.8)[[0, 4, 2, 3, 1]]
-        S_barenco = S_barenco/np.mean(S_barenco)*np.mean(S)
+        S_barenco = S_barenco/np.mean(S_barenco)*np.mean(k_latest[:, 3])
         D_barenco = (np.array([1.2, 1.6, 1.75, 3.2, 2.3])*0.8/3.2)[[0, 4, 2, 3, 1]]
-        D_barenco = D_barenco/np.mean(D_barenco)*np.mean(D)
-        true_data = [B_barenco, S_barenco, D_barenco]
+        D_barenco = D_barenco/np.mean(D_barenco)*np.mean(k_latest[:, 2])
+        true_data = np.array([B_barenco, B_barenco, S_barenco, D_barenco])
     elif true_k is not None:
         true_data = true_k
-    plot_labels = ['Basal rates', 'Sensitivities', 'Decay rates']
+    plot_labels = ['Initial Conditions', 'Basal rates', 'Decay rates', 'Sensitivities']
 
-    plotnum = 331
-    for A, B, label in zip(data, true_data, plot_labels):
+    plotnum = 421
+    for k in range(4):
         plt.subplot(plotnum)
         plotnum+=1
-        plt.bar(np.arange(num_genes)-0.2, A, width=0.4, tick_label=labels, label='Model')
-        if B is not None:
-            plt.bar(np.arange(num_genes)+0.2, B, width=0.4, color='blue', align='center', label=comparison_label)
-        plt.title(label)
+        plt.bar(np.arange(num_genes)-0.2, k_latest[:, k], width=0.4, tick_label=labels, label='Model')
+        if true_data is not None:
+            plt.bar(np.arange(num_genes)+0.2, true_data[:, k], width=0.4, color='blue', align='center', label=comparison_label)
+        plt.title(plot_labels[k])
+        plt.errorbar(np.arange(num_genes)-0.2, k_latest[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
         plt.legend()
 
 
@@ -64,7 +61,9 @@ def plot_kinetics_convergence(k, k_f):
     plt.tight_layout()
 
     num_tfs = k_f.shape[1]
-    plt.figure(figsize=(6, 4*np.ceil(num_tfs/2)))
+    width = 14 if num_tfs > 1 else 6
+    plt.figure(figsize=(width, 4*np.ceil(num_tfs/2)))
+    plt.suptitle('Translation Convergence')
     labels = ['a', 'δ']
     horizontal_subplots = 21 if num_tfs > 1 else 11
     for i in range(num_tfs):
@@ -72,9 +71,7 @@ def plot_kinetics_convergence(k, k_f):
         ax.set_title(f'TF {i}')
         for k in range(2):
             plt.plot(k_f[:, i, k], label=labels[k])
-
-    plt.legend()
-    plt.title('Translation Convergence')
+        plt.legend()
 
 
 def plot_genes(titles, m_preds, data, num_hpd=20):
@@ -184,3 +181,7 @@ def generate_report(data,
         ax.set_title(name)
         plotnum+=1
 
+    plt.figure()
+    for j in range(gene_names.shape[0]):
+        plt.plot(logit(σ2_m[:, j]), label=gene_names[j])
+    plt.legend()
