@@ -3,13 +3,13 @@ import numpy as np
 import arviz
 from reggae.data_loaders import scaled_barenco_data
 
-def plot_kinetics(labels, k, plot_barenco=False, true_k=None, num_avg=50, num_hpd=120):
+def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, num_avg=50, num_hpd=120):
     k_latest = np.mean(k[-num_avg:], axis=0)
     num_genes = k.shape[1]
+    num_tfs = k_f.shape[1]
     true_data = None
 
     plt.suptitle('Transcription ODE Kinetic Parameters')
-    plt.title('Initial Conditions')
     hpds = list()
     for j in range(num_genes):
         hpds.append(arviz.hpd(k[-num_hpd:, j,:], credible_interval=0.95))
@@ -42,6 +42,27 @@ def plot_kinetics(labels, k, plot_barenco=False, true_k=None, num_avg=50, num_hp
         plt.title(plot_labels[k])
         plt.errorbar(np.arange(num_genes)-0.2, k_latest[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
         plt.legend()
+
+    k_latest = np.mean(k_f[-num_avg:], axis=0)
+    labels = [f'TF {i}' for i in range(num_tfs)]
+    plt.figure(figsize=(10, 6))
+    true_data = f64(np.array([[0.1, 0.1, 0.1], [2, 2, 2]]).T)
+    plotnum = 221
+    hpds = list()
+    for i in range(num_tfs):
+        hpds.append(arviz.hpd(k_f[-num_hpd:, i,:], credible_interval=0.95))
+    hpds = np.array(hpds)
+    hpds = abs(hpds - np.expand_dims(k_latest, 2))
+    ylims = [(0, 1.5), (0, 3.5)]
+    for k in range(2):
+        plt.subplot(plotnum)
+        plotnum+=1
+        plt.bar(np.arange(num_tfs)-0.1, k_latest[:, k], width=0.2, tick_label=labels, label='Model')
+        plt.bar(np.arange(num_tfs)+0.1, true_data[:, k], width=0.2, color='blue', align='center', label='True')
+        plt.errorbar(np.arange(num_tfs)-0.1, k_latest[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
+        plt.legend()
+        plt.ylim(ylims[k])
+
 
 
 def plot_kinetics_convergence(k, k_f):
@@ -151,7 +172,7 @@ def plot_tf(data, f_samples, num_hpd=20, plot_barenco=True):
 
 def generate_report(data, 
                     k_samples, 
-                    δ_samples, 
+                    k_f_samples, 
                     f_samples, 
                     σ2_m_samples, 
                     rbf_param_samples,
@@ -168,9 +189,9 @@ def generate_report(data,
 
     plot_genes(gene_names, m_preds, data, num_hpd=num_hpd)
 
-    plot_kinetics_convergence(k_samples, δ_samples)
+    plot_kinetics_convergence(k_samples, k_f_samples)
 
-    plot_kinetics(gene_names, k_samples, true_k=true_k,
+    plot_kinetics(gene_names, k_samples, k_f_samples, true_k=true_k,
                   num_avg=num_avg, plot_barenco=plot_barenco)
                   
     plt.figure(figsize=(10, 4))
@@ -183,5 +204,5 @@ def generate_report(data,
 
     plt.figure()
     for j in range(gene_names.shape[0]):
-        plt.plot(logit(σ2_m[:, j]), label=gene_names[j])
+        plt.plot(σ2_m_samples[:, j], label=gene_names[j])
     plt.legend()
