@@ -347,25 +347,21 @@ class TranscriptionMixedSampler():
             params.kinetics,
             params.fbar,
             params.V,
-            params.σ2_m,
-            params.Δ,
-            params.weights,
-            params.σ2_f,
+            params.σ2_m
         ]
+        if self.options.delays:
+            active_params += [params.Δ]
+        active_params += [
+            params.weights,
+        ]
+        if not self.options.preprocessing_variance:
+            active_params += [params.σ2_f]
+
         kernels = [param.kernel for param in active_params]
 #         if self.options.tf_mrna_present:
         send_all_states = [param.requires_all_states for param in active_params]
 
-        current_state = [
-#             tf.stack([params.k_fbar.value for _ in range(num_chains)], axis=0),
-            params.kinetics.value,
-            params.fbar.value, 
-            [*params.V.value],
-            params.σ2_m.value,
-            params.Δ.value,
-            params.weights.value,
-            params.σ2_f.value,
-        ]
+        current_state = [param.value for param in active_params]
         mixed_kern = MixedKernel(kernels, send_all_states)
         
         def trace_fn(a, previous_kernel_results):
