@@ -3,7 +3,7 @@ import numpy as np
 import arviz
 from reggae.data_loaders import scaled_barenco_data
 
-def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, num_avg=50, num_hpd=120):
+def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, true_k_f=None, num_avg=50, num_hpd=120):
     k_latest = np.mean(k[-num_avg:], axis=0)
     num_genes = k.shape[1]
     num_tfs = k_f.shape[1]
@@ -27,7 +27,7 @@ def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, num_avg=50, n
         S_barenco = S_barenco/np.mean(S_barenco)*np.mean(k_latest[:, 3])
         D_barenco = (np.array([1.2, 1.6, 1.75, 3.2, 2.3])*0.8/3.2)[[0, 4, 2, 3, 1]]
         D_barenco = D_barenco/np.mean(D_barenco)*np.mean(k_latest[:, 2])
-        true_data = np.array([B_barenco, B_barenco, S_barenco, D_barenco])
+        true_data = np.array([B_barenco, B_barenco, S_barenco, D_barenco]).T
     elif true_k is not None:
         true_data = true_k
     plot_labels = ['Initial Conditions', 'Basal rates', 'Decay rates', 'Sensitivities']
@@ -46,7 +46,6 @@ def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, num_avg=50, n
     k_latest = np.mean(k_f[-num_avg:], axis=0)
     labels = [f'TF {i}' for i in range(num_tfs)]
     plt.figure(figsize=(10, 6))
-    true_data = f64(np.array([[0.1, 0.1, 0.1], [2, 2, 2]]).T)
     plotnum = 221
     hpds = list()
     for i in range(num_tfs):
@@ -58,7 +57,8 @@ def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, num_avg=50, n
         plt.subplot(plotnum)
         plotnum+=1
         plt.bar(np.arange(num_tfs)-0.1, k_latest[:, k], width=0.2, tick_label=labels, label='Model')
-        plt.bar(np.arange(num_tfs)+0.1, true_data[:, k], width=0.2, color='blue', align='center', label='True')
+        if true_k_f is not None:
+            plt.bar(np.arange(num_tfs)+0.1, true_k_f[:, k], width=0.2, color='blue', align='center', label='True')
         plt.errorbar(np.arange(num_tfs)-0.1, k_latest[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
         plt.legend()
         plt.ylim(ylims[k])
@@ -147,23 +147,16 @@ def plot_tf(data, f_samples, num_hpd=20, plot_barenco=True):
             plt.plot(τ, f_i[i], c='cadetblue', alpha=0.5, **kwargs)
 
 
-        plt.scatter(τ[common_indices], data.f_obs[i], marker='x', s=70, linewidth=3, label='Observed')
+        plt.scatter(τ[common_indices], data.f_obs[i], marker='x', s=60, linewidth=2, color='tab:blue', label='Observed')
 
         # HPD:
         bounds = arviz.hpd(f_samples[-num_hpd:,i,:], credible_interval=0.95)
         plt.fill_between(τ, bounds[:, 0], bounds[:, 1], color='grey', alpha=0.3, label='95% credibility interval')
-        plt.xticks(t)
-        fig.axes[0].set_xticklabels(t)
-        plt.xlabel('Time (h)')
-        plt.legend()
 
         if plot_barenco:
             barenco_f, _ = scaled_barenco_data(np.mean(f_samples[-10:], axis=0))
             plt.scatter(τ[common_indices], barenco_f, marker='x', s=60, linewidth=3, label='Barenco et al.')
 
-        plt.scatter(τ[common_indices], data.f_obs[i], marker='x', s=70, linewidth=3, label='Observed')
-
-        plt.fill_between(τ, bounds[:, 0], bounds[:, 1], color='grey', alpha=0.3, label='95% credibility interval')
         plt.xticks(t)
         fig.axes[0].set_xticklabels(t)
         plt.xlabel('Time (h)')
@@ -174,13 +167,15 @@ def generate_report(data,
                     k_samples, 
                     k_f_samples, 
                     f_samples, 
-                    σ2_m_samples, 
+                    σ2_m_samples,
+                    σ2_f_samples,
                     rbf_param_samples,
                     m_preds,
                     gene_names=None,
                     num_avg=20,
                     plot_barenco=True,
                     true_k=None,
+                    true_k_f=None,
                     num_hpd=20):
 
     if gene_names is None:
@@ -191,8 +186,8 @@ def generate_report(data,
 
     plot_kinetics_convergence(k_samples, k_f_samples)
 
-    plot_kinetics(gene_names, k_samples, k_f_samples, true_k=true_k,
-                  num_avg=num_avg, plot_barenco=plot_barenco)
+    plot_kinetics(gene_names, k_samples, k_f_samples, true_k=true_k, 
+                  true_k_f=true_k_f, num_avg=num_avg, plot_barenco=plot_barenco)
                   
     plt.figure(figsize=(10, 4))
     plotnum = 0
@@ -205,4 +200,8 @@ def generate_report(data,
     plt.figure()
     for j in range(gene_names.shape[0]):
         plt.plot(σ2_m_samples[:, j], label=gene_names[j])
+    plt.legend()
+    plt.figure()
+    for j in range(σ2_f_samples.shape[1]):
+        plt.plot(σ2_f_samples[:, j], label=gene_names[j])
     plt.legend()

@@ -229,7 +229,7 @@ class DeltaKernel(tfp.mcmc.TransitionKernel):
                 new_state = (1-mask) * new_state + mask * chosen
             return new_state
 #         tf.print('final chosen state', new_state)
-        new_state = tf.cond(iteration_number < 100, lambda: current_state, lambda: proceed())
+        new_state = tf.cond(iteration_number < 500, lambda: current_state, lambda: proceed())
         return new_state, GenericResults([iteration_number+1], True)
 
     def bootstrap_results(self, init_state, all_states):
