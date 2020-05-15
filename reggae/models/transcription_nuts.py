@@ -42,7 +42,7 @@ class TranscriptionLikelihood():
         resolution = τ[1]-τ[0]
         sum_term = tfm.multiply(tfm.exp(δ_i*τ), f_i)
         integrals = tf.concat([tf.zeros((self.num_tfs, 1), dtype='float64'), 
-                         0.5*resolution*tfm.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) 
+                               0.5*resolution*tfm.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) 
         exp_δt = tfm.exp(-δ_i*τ)
         p_i = a_i * exp_δt + exp_δt * integrals
         return p_i
@@ -146,7 +146,7 @@ class TranscriptionMixedSampler():
     Data is a tuple (m, f) of shapes (num, time)
     time is a tuple (t, τ, common_indices)
     '''
-    def __init__(self, data: DataHolder, options: Options):
+    def __init__(self, data: DataHolder, options: Options, state_indices=None):
         self.data = data
         self.samples = None
         min_dist = min(data.t[1:]-data.t[:-1])
@@ -159,15 +159,17 @@ class TranscriptionMixedSampler():
         self.likelihood = TranscriptionLikelihood(data, options)
         self.options = options
 
-        self.state_indices = {
-            'kinetics': 0,
-            'fbar': 1, 
-            'rbf_params': 2,
-            'σ2_m': 3,
-            'Δ': 4,
-            'weights': 5,
-            'σ2_f': 6,
-        }
+        self.state_indices = state_indices
+        if state_indices is None:
+            self.state_indices = {
+                'kinetics': 0,
+                'fbar': 1, 
+                'rbf_params': 2,
+                'σ2_m': 3,
+                'Δ': 4,
+                'weights': 5,
+                'σ2_f': 6,
+            }
         logistic_step_size = 0.00001
 
         # Interaction weights
@@ -226,21 +228,22 @@ class TranscriptionMixedSampler():
             def rbf_params_log_prob(vbar, l2bar):
                 v = logit(vbar, nan_replace=self.params.V.prior.b)
                 l2 = logit(l2bar, nan_replace=self.params.L.prior.b)
-
+                # tf.print(v, l2)
                 new_prob = tf.reduce_sum(self.params.fbar.prior(all_states[self.state_indices['fbar']], vbar, l2bar))
                 new_prob += self.params.V.prior.log_prob(v)
                 new_prob += self.params.L.prior.log_prob(l2)
-#                 tf.print('new prob', new_prob)
+                # tf.print('new prob', new_prob)
 #                 if new_prob < -1e3:
 #                     tf.print(all_states[self.state_indices['fbar']], v, l2)
                 return tf.reduce_sum(new_prob)
             return rbf_params_log_prob
 
         V = Parameter('rbf_params', LogisticNormal(f64(1e-4), f64(1+max(np.var(data.f_obs, axis=1))),allow_nan_stats=False), 
-                      [0.76*tf.ones(self.num_tfs, dtype='float64'), 0.94*tf.ones(self.num_tfs, dtype='float64')], 
+                    #   [0.76*tf.ones(self.num_tfs, dtype='float64'), 0.94*tf.ones(self.num_tfs, dtype='float64')], 
+                      [0.8*tf.ones(self.num_tfs, dtype='float64'), 0.98*tf.ones(self.num_tfs, dtype='float64')], 
                       step_size=logistic_step_size, fixed=not options.tf_mrna_present, 
                       hmc_log_prob=rbf_params_log_prob, requires_all_states=True)
-        L = Parameter('L', LogisticNormal(f64(min_dist**2), f64(data.t[-1]**2), allow_nan_stats=False), None)
+        L = Parameter('L', LogisticNormal(f64(min_dist**2)-0.2, f64(data.t[-1]**2), allow_nan_stats=False), None)
 
         self.t_dist = get_rbf_dist(data.τ, self.N_p)
 
@@ -262,7 +265,7 @@ class TranscriptionMixedSampler():
                 # tf.print('prob', tf.reduce_sum(new_prob))
                 return tf.reduce_sum(new_prob)                
             return σ2_m_log_prob_fn
-        σ2_m = Parameter('σ2_m', LogisticNormal(f64(1e-5), f64(max(np.var(data.f_obs, axis=1)))), 
+        σ2_m = Parameter('σ2_m', LogisticNormal(f64(1e-5), f64(1e-2)), # f64(max(np.var(data.f_obs, axis=1)))
                          logistic(f64(5e-3))*tf.ones(self.num_genes, dtype='float64'), 
                          hmc_log_prob=σ2_m_log_prob, requires_all_states=True, step_size=logistic_step_size)
         # Transcription kinetic parameters
