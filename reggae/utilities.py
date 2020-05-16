@@ -21,10 +21,10 @@ def discretise(t, num_disc = 10):
     common_indices = np.searchsorted(τ, t)
     return τ, common_indices
 
-def get_rbf_dist(times, N):
-    t_1 = np.reshape(np.tile(times, N), [N, N]).T
-    t_2 = np.reshape(np.tile(times, N), [N, N])
-    return t_1-t_2
+def get_time_square(times, N):
+    t_1 = tf.transpose(tf.reshape(tf.tile(times, [N]), [N, N]))
+    t_2 = tf.reshape(tf.tile(times, [N]), [N, N])
+    return t_1, t_2
 
 def logistic(x): # (inverse logit)
     return tfm.exp(x)/(1+tfm.exp(x))

@@ -6,12 +6,13 @@ import tensorflow_probability as tfp
 from tensorflow_probability import bijectors as tfb
 from tensorflow_probability import distributions as tfd
 
-from reggae.mcmc import MetropolisHastings, Parameter, MetropolisKernel
+from reggae.mcmc import MetropolisHastings, MetropolisKernel
+from reggae.mcmc.parameter import KernelParameter, Parameter
 from reggae.models.results import GenericResults
-from reggae.models import Options
-from reggae.models.kernels import FKernel, MixedKernel, DeltaKernel, GibbsKernel
+from reggae.models import Options, GPKernelSelector
+from reggae.mcmc.kernels import FKernel, MixedKernel, DeltaKernel, GibbsKernel
 from reggae.data_loaders import DataHolder
-from reggae.utilities import rotate, get_rbf_dist, jitter_cholesky, logit, logistic, LogisticNormal
+from reggae.utilities import rotate, jitter_cholesky, logit, logistic, LogisticNormal
 
 import numpy as np
 from scipy.special import expit
@@ -135,10 +136,10 @@ class TranscriptionLikelihood():
 
 
 TupleParams_pre = collections.namedtuple('TupleParams_pre', [
-    'fbar','k_fbar','kbar','σ2_m','weights','L','V', 'Δ', 'kinetics', 'σ2_f',
+    'fbar','σ2_m','weights','kernel_params', 'Δ', 'kinetics', 'σ2_f',
 ])
 TupleParams = collections.namedtuple('TupleParams', [
-    'fbar','k_fbar','kbar','σ2_m','weights','L','V', 'Δ', 'kinetics',
+    'fbar','σ2_m','weights','kernel_params', 'Δ', 'kinetics',
 ])
 
 class TranscriptionMixedSampler():
@@ -158,13 +159,13 @@ class TranscriptionMixedSampler():
 
         self.likelihood = TranscriptionLikelihood(data, options)
         self.options = options
-
+        self.kernel_selector = GPKernelSelector(options, data.τ)
         self.state_indices = state_indices
         if state_indices is None:
             self.state_indices = {
                 'kinetics': 0,
                 'fbar': 1, 
-                'rbf_params': 2,
+                'kernel_params': 2,
                 'σ2_m': 3,
                 'Δ': 4,
                 'weights': 5,
@@ -184,14 +185,16 @@ class TranscriptionMixedSampler():
                 new_prob += tf.reduce_sum(self.params.weights.prior[1].log_prob(logit(w_0star)))
                 return tf.reduce_sum(new_prob)
             return w_log_prob_fn
-        w = Parameter('w', LogisticNormal(f64(-1), f64(1)), logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64')))
-        w_0 = Parameter('w_0', LogisticNormal(f64(-1), f64(1)), 0.5*tf.ones(self.num_genes, dtype='float64'))
-        weights = Parameter('weights', [w.prior, w_0.prior], [w.value, w_0.value], step_size=logistic_step_size,
-                            hmc_log_prob=w_log_prob, requires_all_states=True)
+        w_prior = LogisticNormal(f64(-1), f64(1))
+        w_value = logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64'))
+        w_0_prior = LogisticNormal(f64(-1), f64(1))
+        w_0_value = 0.5*tf.ones(self.num_genes, dtype='float64')
+        weights = KernelParameter('weights', [w_prior, w_0_prior], [w_value, w_0_value], step_size=logistic_step_size,
+                                  hmc_log_prob=w_log_prob, requires_all_states=True)
         # Latent function
         def fbar_log_prob(all_states):
             def fbar_log_prob_fn(fstar):
-                vbar, l2bar = all_states[self.state_indices['rbf_params']]
+                vbar, l2bar = all_states[self.state_indices['kernel_params']]
                 
                 new_m_likelihood = self.likelihood.genes(
                     all_states,
@@ -214,69 +217,57 @@ class TranscriptionMixedSampler():
                               self.num_tfs, self.num_genes, 
                               self.options.tf_mrna_present, 
                               self.state_indices,
-                              0.005*tf.ones(self.N_p, dtype='float64'))
+                              0.05*tf.ones(self.N_p, dtype='float64'))
         fbar_initial = 0.5*tf.ones((self.num_tfs, self.N_p), dtype='float64')
         if self.options.latent_function_metropolis:
-            fbar = Parameter('fbar', self.fbar_prior, fbar_initial,
-                             kernel=fbar_kernel, requires_all_states=False)
+            fbar = KernelParameter('fbar', self.fbar_prior, fbar_initial,
+                                   kernel=fbar_kernel, requires_all_states=False)
         else:
-            fbar = Parameter('fbar', self.fbar_prior, fbar_initial, hmc_log_prob=fbar_log_prob,
-                             requires_all_states=True, step_size=logistic_step_size)
+            fbar = KernelParameter('fbar', self.fbar_prior, fbar_initial, hmc_log_prob=fbar_log_prob,
+                                   requires_all_states=True, step_size=logistic_step_size)
 
         # GP hyperparameters
-        def rbf_params_log_prob(all_states):
-            def rbf_params_log_prob(vbar, l2bar):
-                v = logit(vbar, nan_replace=self.params.V.prior.b)
-                l2 = logit(l2bar, nan_replace=self.params.L.prior.b)
-                # tf.print(v, l2)
-                new_prob = tf.reduce_sum(self.params.fbar.prior(all_states[self.state_indices['fbar']], vbar, l2bar))
-                new_prob += self.params.V.prior.log_prob(v)
-                new_prob += self.params.L.prior.log_prob(l2)
+        def kernel_params_log_prob(all_states):
+            def kernel_params_log_prob(param_0bar, param_1bar):
+                param_0 = logit(param_0bar, nan_replace=self.params.kernel_params.prior[0].b)
+                param_1 = logit(param_1bar, nan_replace=self.params.kernel_params.prior[1].b)
+                new_prob = tf.reduce_sum(self.params.fbar.prior(
+                            all_states[self.state_indices['fbar']], param_0bar, param_1bar))
+                new_prob += self.params.kernel_params.prior[0].log_prob(param_0)
+                new_prob += self.params.kernel_params.prior[1].log_prob(param_1)
                 # tf.print('new prob', new_prob)
 #                 if new_prob < -1e3:
 #                     tf.print(all_states[self.state_indices['fbar']], v, l2)
                 return tf.reduce_sum(new_prob)
-            return rbf_params_log_prob
+            return kernel_params_log_prob
 
-        V = Parameter('rbf_params', LogisticNormal(f64(1e-4), f64(1+max(np.var(data.f_obs, axis=1))),allow_nan_stats=False), 
+        kernel_params = KernelParameter('kernel_params', [LogisticNormal(f64(1e-4), f64(1+max(np.var(data.f_obs, axis=1)))), LogisticNormal(f64(min_dist**2)-0.2, f64(data.t[-1]**2))],
                     #   [0.76*tf.ones(self.num_tfs, dtype='float64'), 0.94*tf.ones(self.num_tfs, dtype='float64')], 
                       [0.8*tf.ones(self.num_tfs, dtype='float64'), 0.98*tf.ones(self.num_tfs, dtype='float64')], 
-                      step_size=logistic_step_size, fixed=not options.tf_mrna_present, 
-                      hmc_log_prob=rbf_params_log_prob, requires_all_states=True)
-        L = Parameter('L', LogisticNormal(f64(min_dist**2)-0.2, f64(data.t[-1]**2), allow_nan_stats=False), None)
+                      step_size=logistic_step_size, hmc_log_prob=kernel_params_log_prob, requires_all_states=True)
 
-        self.t_dist = get_rbf_dist(data.τ, self.N_p)
-
-        # Translation kinetic parameters
-        k_fbar = Parameter('k_fbar', LogisticNormal(0.1, 3), 0.7*tf.ones((self.num_tfs,2), dtype='float64'))
 
         # White noise for genes
-        # if not options.preprocessing_variance:
-        #     σ2_f_kernel = GibbsKernel(self.options)
-
-        def σ2_m_log_prob(all_states):
-            def σ2_m_log_prob_fn(σ2_mstar):
-                # tf.print('starr:', logit(σ2_mstar))
+        if not options.preprocessing_variance:
+            σ2_m_kernel = GibbsKernel(data, options, self.likelihood, tfd.InverseGamma(f64(0.01), f64(0.01)), self.state_indices)
+            σ2_m = KernelParameter('σ2_m', None, f64(1e-3), kernel=σ2_m_kernel)
+        else:
+            def σ2_m_log_prob(all_states):
+                def σ2_m_log_prob_fn(σ2_mstar):
+                    # tf.print('starr:', logit(σ2_mstar))
                 new_prob = self.likelihood.genes(
                     all_states=all_states, 
                     state_indices=self.state_indices,
                     σ2_m=σ2_mstar 
                 ) + self.params.σ2_m.prior.log_prob(logit(σ2_mstar))
-                # tf.print('prob', tf.reduce_sum(new_prob))
-                return tf.reduce_sum(new_prob)                
-            return σ2_m_log_prob_fn
-        σ2_m = Parameter('σ2_m', LogisticNormal(f64(1e-5), f64(1e-2)), # f64(max(np.var(data.f_obs, axis=1)))
-                         logistic(f64(5e-3))*tf.ones(self.num_genes, dtype='float64'), 
-                         hmc_log_prob=σ2_m_log_prob, requires_all_states=True, step_size=logistic_step_size)
-        # Transcription kinetic parameters
-        def constrain_kbar(kbar, gene):
-            '''Constrains a given row in kbar'''
-#             if gene == 3:
-#                 kbar[2] = np.log(0.8)
-#                 kbar[3] = np.log(1.0)
-            kbar[kbar < -10] = -10
-            kbar[kbar > 3] = 3
-            return kbar
+                    # tf.print('prob', tf.reduce_sum(new_prob))
+                    return tf.reduce_sum(new_prob)                
+                return σ2_m_log_prob_fn
+            σ2_m = KernelParameter('σ2_m', LogisticNormal(f64(1e-5), f64(1e-4)), # f64(max(np.var(data.f_obs, axis=1)))
+                            logistic(f64(5e-3))*tf.ones(self.num_genes, dtype='float64'), 
+                            hmc_log_prob=σ2_m_log_prob, requires_all_states=True, step_size=logistic_step_size)
+
+        # Kinetic parameters
         kbar_initial = 0.6*np.float64(np.c_[ # was -0.1
             np.ones(self.num_genes), # a_j
             np.ones(self.num_genes), # b_j
@@ -293,42 +284,35 @@ class TranscriptionMixedSampler():
                     kbar=kbar,
                     k_fbar=k_fbar,
                 ) 
-                new_prob += tf.reduce_sum(self.params.kbar.prior.log_prob(k_m))
-                new_prob += tf.reduce_sum(self.params.k_fbar.prior.log_prob(k_f))
+                new_prob += tf.reduce_sum(self.params.kinetics.prior[0].log_prob(k_m))
+                new_prob += tf.reduce_sum(self.params.kinetics.prior[1].log_prob(k_f))
                 return tf.reduce_sum(new_prob)
             return kbar_log_prob_fn
-        for j, k in enumerate(kbar_initial):
-            kbar_initial[j] = constrain_kbar(k, j)
-        kbar = Parameter('kbar', LogisticNormal(0.01, 8), kbar_initial, constraint=constrain_kbar)
-        
-        kinetics = Parameter('kinetics', None, [kbar.value, k_fbar.value],
-                             hmc_log_prob=kbar_log_prob, constraint=constrain_kbar, 
-                             step_size=logistic_step_size, requires_all_states=True)
+
+        k_fbar_initial = 0.7*tf.ones((self.num_tfs,2), dtype='float64')
+        kinetics = KernelParameter('kinetics', [LogisticNormal(0.01, 8), LogisticNormal(0.1, 5)], [kbar_initial, k_fbar_initial],
+                             hmc_log_prob=kbar_log_prob, step_size=logistic_step_size, requires_all_states=True)
 
 
         delta_kernel = DeltaKernel(self.likelihood, 0, 10, self.state_indices, tfd.Exponential(f64(0.3)))
-        Δ = Parameter('Δ', tfd.InverseGamma(f64(0.01), f64(0.01)), 0.6*tf.ones(self.num_tfs, dtype='float64'),
+        Δ = KernelParameter('Δ', tfd.InverseGamma(f64(0.01), f64(0.01)), 0.6*tf.ones(self.num_tfs, dtype='float64'),
                         kernel=delta_kernel, requires_all_states=False)
         
         if not options.preprocessing_variance:
             kernel = GibbsKernel(data, options, self.likelihood, tfd.InverseGamma(f64(0.01), f64(0.01)), self.state_indices)
-            σ2_f = Parameter('σ2_f', None, 1e-4*tf.ones((self.num_tfs,1), dtype='float64'), kernel=kernel)
-            self.params = TupleParams_pre(fbar, k_fbar, kbar, σ2_m, weights, L, V, Δ, kinetics, σ2_f)
+            σ2_f = KernelParameter('σ2_f', None, 1e-4*tf.ones((self.num_tfs,1), dtype='float64'), kernel=kernel)
+            self.params = TupleParams_pre(fbar, σ2_m, weights, kernel_params, Δ, kinetics, σ2_f)
         else:
-            self.params = TupleParams(fbar, k_fbar, kbar, σ2_m, weights, L, V, Δ, kinetics)
+            self.params = TupleParams(fbar, σ2_m, weights, kernel_params, Δ, kinetics)
             
-    def fbar_prior_params(self, vbar, l2bar):
-        v = logit(vbar, nan_replace=self.params.V.prior.b)
-        l2 = logit(l2bar, nan_replace=self.params.L.prior.b)
+    def fbar_prior_params(self, param_0bar, param_1bar):
+        param_0 = logit(param_0bar, nan_replace=self.params.kernel_params.prior[0].b)
+        param_1 = logit(param_1bar, nan_replace=self.params.kernel_params.prior[1].b)
 
-#         tf.print('vl2', v, l2)
-        sq_dist = tf.divide(tfm.square(self.t_dist), tf.reshape(2*l2, (-1, 1, 1)))
-        K = tf.reshape(v, (-1, 1, 1)) * tfm.exp(-sq_dist)
-        m = tf.zeros((self.N_p), dtype='float64')
-        return m, K
+        return self.kernel_selector()(param_0, param_1)
 
-    def fbar_prior(self, fbar, v, l2):
-        m, K = self.fbar_prior_params(v, l2)
+    def fbar_prior(self, fbar, param_0bar, param_1bar):
+        m, K = self.fbar_prior_params(param_0bar, param_1bar)
 #         tf.print(fbar[0][:6])
         jitter = tf.linalg.diag(1e-8 *tf.ones(self.N_p, dtype='float64'))
         prob = 0
@@ -349,7 +333,7 @@ class TranscriptionMixedSampler():
         active_params = [
             params.kinetics,
             params.fbar,
-            params.V,
+            params.kernel_params,
             params.σ2_m
         ]
         if self.options.delays:
@@ -417,8 +401,8 @@ class TranscriptionMixedSampler():
         return self.likelihood.predict_m(kbar, k_fbar, w, fbar, w_0)
 
     def predict_m_with_current(self):
-        return self.likelihood.predict_m(self.params.kbar.value, 
-                                         self.params.k_fbar.value, 
+        return self.likelihood.predict_m(self.params.kinetics.value[0], 
+                                         self.params.kinetics.value[1], 
                                          self.params.weights.value[0], 
                                          self.params.fbar.value,
                                          self.params.weights.value[1])

@@ -5,7 +5,7 @@ import tensorflow_probability as tfp
 
 from reggae.mcmc import MetropolisHastings, Parameter, MetropolisKernel
 from reggae.models.results import GenericResults, MixedKernelResults
-from reggae.utilities import get_rbf_dist, exp, mult, jitter_cholesky, logit
+from reggae.utilities import jitter_cholesky, logit
 
 import numpy as np
 
@@ -131,8 +131,8 @@ class FKernel(MetropolisKernel):
         z_i = tfd.MultivariateNormalDiag(fbar, self.h_f).sample()
 
         # MH
-        rbf_params = (all_states[self.state_indices['rbf_params']][0], all_states[self.state_indices['rbf_params']][1])
-        m, K = self.fbar_prior_params(*rbf_params)
+        kernel_params = (all_states[self.state_indices['kernel_params']][0], all_states[self.state_indices['kernel_params']][1])
+        m, K = self.fbar_prior_params(*kernel_params)
         for i in range(self.num_tfs):
             invKsigmaK = tf.matmul(tf.linalg.inv(K[i]+tf.linalg.diag(self.h_f)), K[i]) # (C_i + hI)C_i
             L = jitter_cholesky(K[i]-tf.matmul(K[i], invKsigmaK))
