@@ -103,7 +103,7 @@ def plot_genes(titles, m_preds, data, num_hpd=20):
     for j in range(num_genes):
         ax = plt.subplot(531+j)
         plt.title(titles[j])
-        plt.scatter(data.common_indices, data.m_obs[j], marker='x', label='Observed')
+        plt.scatter(data.common_indices, data.m_obs[0, j], marker='x', label='Observed')
         # plt.errorbar([n*10+n for n in range(7)], Y[j], 2*np.sqrt(Y_var[j]), fmt='none', capsize=5)
 
         for i in range(1, 20):
@@ -123,7 +123,7 @@ def plot_tf(data, f_samples, num_hpd=20, plot_barenco=True):
     t = data.t
     τ = data.τ
     common_indices = data.common_indices.numpy()
-    num_tfs = data.f_obs.shape[0]
+    num_tfs = data.f_obs.shape[1]
     fig = plt.figure(figsize=(13, 7*np.ceil(num_tfs/2)))
     plt.suptitle('Transcription Factors')
 
@@ -146,7 +146,7 @@ def plot_tf(data, f_samples, num_hpd=20, plot_barenco=True):
             plt.plot(τ, f_i[i], c='cadetblue', alpha=0.5, **kwargs)
 
 
-        plt.scatter(τ[common_indices], data.f_obs[i], marker='x', s=60, linewidth=2, color='tab:blue', label='Observed')
+        plt.scatter(τ[common_indices], data.f_obs[0, i], marker='x', s=60, linewidth=2, color='tab:blue', label='Observed')
 
         # HPD:
         bounds = arviz.hpd(f_samples[-num_hpd:,i,:], credible_interval=0.95)
@@ -203,7 +203,7 @@ def generate_report(data,
                     num_hpd=20):
 
     if gene_names is None:
-        gene_names = np.arange(data.m_obs.shape[0])
+        gene_names = np.arange(data.m_obs.shape[1])
     plot_tf(data, f_samples, plot_barenco=plot_barenco)
 
     plot_genes(gene_names, m_preds, data, num_hpd=num_hpd)

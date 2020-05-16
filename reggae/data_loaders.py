@@ -82,13 +82,13 @@ def load_barenco_puma():
 
     tf_scale = np.sqrt(np.var(tfs_full[:, :7], ddof=1))
     tf_scale = np.c_[[tf_scale for _ in range(7*3)]].T
-    tfs = np.float64(tfs_full / tf_scale).reshape(3, 7)
-    tf_var = (tf_var_full / tf_scale**2).reshape(3, 7)
+    tfs = np.float64(tfs_full / tf_scale).reshape((3, 1, 7))
+    tf_var = (tf_var_full / tf_scale**2).reshape((3, 1, 7))
 
     gene_scale = np.sqrt(np.var(genes_full[:,:7], axis=1, ddof=1))
     gene_scale = np.c_[[gene_scale for _ in range(7*3)]].T
-    genes = np.float64(genes_full / gene_scale).reshape(5, 3, 7).swapaxes(0, 1)
-    gene_var = np.float64(gene_var_full / gene_scale**2).reshape(5, 3, 7).swapaxes(0, 1)
+    genes = np.float64(genes_full / gene_scale).reshape((5, 3, 7)).swapaxes(0, 1)
+    gene_var = np.float64(gene_var_full / gene_scale**2).reshape((5, 3, 7)).swapaxes(0, 1)
 
     return (genes_df, genes), (tfs_df, np.float64(tfs)), gene_var, tf_var, np.arange(7)*2           # Observation times
 

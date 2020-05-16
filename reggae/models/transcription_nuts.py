@@ -24,8 +24,8 @@ class TranscriptionLikelihood():
         self.options = options
         self.data = data
         self.preprocessing_variance = options.preprocessing_variance
-        self.num_genes = data.m_obs.shape[0]
-        self.num_tfs = data.f_obs.shape[0]
+        self.num_genes = data.m_obs.shape[1]
+        self.num_tfs = data.f_obs.shape[1]
 
     def calculate_protein(self, fbar, k_fbar, Δ=None): # Calculate p_i vector
         τ = self.data.τ
@@ -106,8 +106,8 @@ class TranscriptionLikelihood():
     @tf.function
     def _genes(self, k_fbar, fbar, kbar, w, w_0, σ2_m, Δ=None):
         m_pred = self.predict_m(kbar, k_fbar, w, fbar, w_0, Δ)
-
-        sq_diff = tfm.square(self.data.m_obs - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
+        # TODO below replica
+        sq_diff = tfm.square(self.data.m_obs[0] - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
         variance = logit(tf.reshape(σ2_m, (-1, 1)))
         if self.preprocessing_variance:
             variance = variance + self.data.σ2_m_pre # add PUMA variance
@@ -125,8 +125,8 @@ class TranscriptionLikelihood():
             variance = tf.reshape(σ2_f, (-1, 1))
         else:
             variance = self.data.σ2_f_pre
-        f_pred = tfm.log(1+tfm.exp(fbar))
-        sq_diff = tfm.square(self.data.f_obs - tf.transpose(tf.gather(tf.transpose(f_pred),self.data.common_indices)))
+        f_pred = tfm.log(1+tfm.exp(fbar)) # TODO below replica
+        sq_diff = tfm.square(self.data.f_obs[0] - tf.transpose(tf.gather(tf.transpose(f_pred),self.data.common_indices)))
 
         log_lik = -0.5*tfm.log(2*np.pi*variance) - 0.5*sq_diff/variance
         log_lik = tf.reduce_sum(log_lik, axis=1)
@@ -147,31 +147,21 @@ class TranscriptionMixedSampler():
     Data is a tuple (m, f) of shapes (num, time)
     time is a tuple (t, τ, common_indices)
     '''
-    def __init__(self, data: DataHolder, options: Options, state_indices=None):
+    def __init__(self, data: DataHolder, options: Options):
         self.data = data
         self.samples = None
-        min_dist = min(data.t[1:]-data.t[:-1])
         self.N_p = data.τ.shape[0]
         self.N_m = data.t.shape[0]      # Number of observations
 
-        self.num_tfs = data.f_obs.shape[0] # Number of TFs
-        self.num_genes = data.m_obs.shape[0]
+        self.num_tfs = data.f_obs.shape[1] # Number of TFs
+        self.num_genes = data.m_obs.shape[1]
 
         self.likelihood = TranscriptionLikelihood(data, options)
         self.options = options
-        self.kernel_selector = GPKernelSelector(options, data.τ)
-        self.state_indices = state_indices
-        if state_indices is None:
-            self.state_indices = {
-                'kinetics': 0,
-                'fbar': 1, 
-                'kernel_params': 2,
-                'σ2_m': 3,
-                'Δ': 4,
-                'weights': 5,
-                'σ2_f': 6,
-            }
-        logistic_step_size = 0.00001
+        self.kernel_selector = GPKernelSelector(data, options)
+
+        self.state_indices = {}
+        logistic_step_size = 0.0001
 
         # Interaction weights
         def w_log_prob(all_states):
@@ -241,9 +231,12 @@ class TranscriptionMixedSampler():
                 return tf.reduce_sum(new_prob)
             return kernel_params_log_prob
 
-        kernel_params = KernelParameter('kernel_params', [LogisticNormal(f64(1e-4), f64(1+max(np.var(data.f_obs, axis=1)))), LogisticNormal(f64(min_dist**2)-0.2, f64(data.t[-1]**2))],
+        kernel_initial = self.kernel_selector.initial_params()
+        kernel_ranges = self.kernel_selector.ranges()
+        kernel_params = KernelParameter('kernel_params', 
+                      [LogisticNormal(*kernel_ranges[0]), LogisticNormal(*kernel_ranges[1])],
                     #   [0.76*tf.ones(self.num_tfs, dtype='float64'), 0.94*tf.ones(self.num_tfs, dtype='float64')], 
-                      [0.8*tf.ones(self.num_tfs, dtype='float64'), 0.98*tf.ones(self.num_tfs, dtype='float64')], 
+                      kernel_initial, 
                       step_size=logistic_step_size, hmc_log_prob=kernel_params_log_prob, requires_all_states=True)
 
 
@@ -255,11 +248,11 @@ class TranscriptionMixedSampler():
             def σ2_m_log_prob(all_states):
                 def σ2_m_log_prob_fn(σ2_mstar):
                     # tf.print('starr:', logit(σ2_mstar))
-                new_prob = self.likelihood.genes(
-                    all_states=all_states, 
-                    state_indices=self.state_indices,
-                    σ2_m=σ2_mstar 
-                ) + self.params.σ2_m.prior.log_prob(logit(σ2_mstar))
+                    new_prob = self.likelihood.genes(
+                        all_states=all_states, 
+                        state_indices=self.state_indices,
+                        σ2_m=σ2_mstar 
+                    ) + self.params.σ2_m.prior.log_prob(logit(σ2_mstar))
                     # tf.print('prob', tf.reduce_sum(new_prob))
                     return tf.reduce_sum(new_prob)                
                 return σ2_m_log_prob_fn
@@ -304,7 +297,23 @@ class TranscriptionMixedSampler():
             self.params = TupleParams_pre(fbar, σ2_m, weights, kernel_params, Δ, kinetics, σ2_f)
         else:
             self.params = TupleParams(fbar, σ2_m, weights, kernel_params, Δ, kinetics)
-            
+        
+        self.active_params = [
+            self.params.kinetics,
+            self.params.fbar,
+            self.params.kernel_params,
+            self.params.σ2_m,
+            self.params.weights
+        ]
+        if not options.preprocessing_variance:
+            self.active_params += [self.params.σ2_f]
+        if options.delays:
+            self.active_params += [self.params.Δ]
+
+        self.state_indices.update({
+            param.name: i for i, param in enumerate(self.active_params)
+        })
+
     def fbar_prior_params(self, param_0bar, param_1bar):
         param_0 = logit(param_0bar, nan_replace=self.params.kernel_params.prior[0].b)
         param_1 = logit(param_1bar, nan_replace=self.params.kernel_params.prior[1].b)
@@ -313,7 +322,6 @@ class TranscriptionMixedSampler():
 
     def fbar_prior(self, fbar, param_0bar, param_1bar):
         m, K = self.fbar_prior_params(param_0bar, param_1bar)
-#         tf.print(fbar[0][:6])
         jitter = tf.linalg.diag(1e-8 *tf.ones(self.N_p, dtype='float64'))
         prob = 0
         for i in range(self.num_tfs):
@@ -330,25 +338,12 @@ class TranscriptionMixedSampler():
             unit_name='step'
         )
 
-        active_params = [
-            params.kinetics,
-            params.fbar,
-            params.kernel_params,
-            params.σ2_m
-        ]
-        if self.options.delays:
-            active_params += [params.Δ]
-        active_params += [
-            params.weights,
-        ]
-        if not self.options.preprocessing_variance:
-            active_params += [params.σ2_f]
 
-        kernels = [param.kernel for param in active_params]
+        kernels = [param.kernel for param in self.active_params]
 #         if self.options.tf_mrna_present:
-        send_all_states = [param.requires_all_states for param in active_params]
+        send_all_states = [param.requires_all_states for param in self.active_params]
 
-        current_state = [param.value for param in active_params]
+        current_state = [param.value for param in self.active_params]
         mixed_kern = MixedKernel(kernels, send_all_states)
         
         def trace_fn(a, previous_kernel_results):
@@ -370,7 +365,7 @@ class TranscriptionMixedSampler():
         samples, is_accepted = run_chain()
 
         add_to_previous = (self.samples is not None)
-        for param in active_params:
+        for param in self.active_params:
             index = self.state_indices[param.name]
             param_samples = samples[index]
             if type(param_samples) is list:
