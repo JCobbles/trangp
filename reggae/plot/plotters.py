@@ -9,7 +9,6 @@ def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, true_k_f=None
     num_tfs = k_f.shape[1]
     true_data = None
 
-    plt.suptitle('Transcription ODE Kinetic Parameters')
     hpds = list()
     for j in range(num_genes):
         hpds.append(arviz.hpd(k[-num_hpd:, j,:], credible_interval=0.95))
@@ -17,6 +16,7 @@ def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, true_k_f=None
     hpds = abs(hpds - np.expand_dims(k_latest, 2))
 
     plt.figure(figsize=(10, 14))
+    plt.suptitle('Transcription ODE Kinetic Parameters')
     comparison_label = 'True'
     if plot_barenco:
         comparison_label = 'Barenco et al.'
@@ -27,7 +27,7 @@ def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, true_k_f=None
         S_barenco = S_barenco/np.mean(S_barenco)*np.mean(k_latest[:, 3])
         D_barenco = (np.array([1.2, 1.6, 1.75, 3.2, 2.3])*0.8/3.2)[[0, 4, 2, 3, 1]]
         D_barenco = D_barenco/np.mean(D_barenco)*np.mean(k_latest[:, 2])
-        true_data = np.array([B_barenco, B_barenco, S_barenco, D_barenco]).T
+        true_data = np.array([np.zeros(num_genes), B_barenco, S_barenco, D_barenco]).T
     elif true_k is not None:
         true_data = true_k
     plot_labels = ['Initial Conditions', 'Basal rates', 'Decay rates', 'Sensitivities']
@@ -62,7 +62,6 @@ def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, true_k_f=None
         plt.errorbar(np.arange(num_tfs)-0.1, k_latest[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
         plt.legend()
         plt.ylim(ylims[k])
-
 
 
 def plot_kinetics_convergence(k, k_f):
@@ -163,6 +162,30 @@ def plot_tf(data, f_samples, num_hpd=20, plot_barenco=True):
         plt.legend()
     plt.tight_layout()
 
+def plot_noises(σ2_m_samples, σ2_f_samples, gene_names):
+    plt.figure(figsize=(5, 3))
+    for j in range(gene_names.shape[0]):
+        plt.plot(σ2_m_samples[:, j], label=gene_names[j])
+    plt.legend()
+    if σ2_f_samples is not None:
+        plt.figure(figsize=(5, 3))
+        for j in range(σ2_f_samples.shape[1]):
+            plt.plot(σ2_f_samples[:, j])
+        plt.legend()
+
+def plot_weights(weights, gene_names):
+    plt.figure()
+    w = weights[0]
+    w_0 = weights[1]
+    for j in range(gene_names.shape[0]):
+        plt.plot(w[:, j], label=gene_names[j])
+    plt.legend()
+    plt.title('Interaction weights')
+    plt.figure()
+    for j in range(gene_names.shape[0]):
+        plt.plot(w_0[:,j])
+    plt.title('Interaction bias')
+
 def generate_report(data, 
                     k_samples, 
                     k_f_samples, 
@@ -171,6 +194,7 @@ def generate_report(data,
                     σ2_f_samples,
                     rbf_param_samples,
                     m_preds,
+                    weight_samples,
                     gene_names=None,
                     num_avg=20,
                     plot_barenco=True,
@@ -186,22 +210,18 @@ def generate_report(data,
 
     plot_kinetics_convergence(k_samples, k_f_samples)
 
-    plot_kinetics(gene_names, k_samples, k_f_samples, true_k=true_k, 
-                  true_k_f=true_k_f, num_avg=num_avg, plot_barenco=plot_barenco)
+    plot_kinetics(gene_names, k_samples, k_f_samples, true_k=true_k, true_k_f=true_k_f, 
+                  num_avg=num_avg, num_hpd=num_hpd, plot_barenco=plot_barenco)
                   
     plt.figure(figsize=(10, 4))
     plotnum = 0
-    for name, param in (zip(['L', 'V'], rbf_param_samples)):
+    for name, param in (zip(['V', 'L'], rbf_param_samples)):
         ax = plt.subplot(221+plotnum)
         plt.plot(param)
         ax.set_title(name)
         plotnum+=1
 
-    plt.figure()
-    for j in range(gene_names.shape[0]):
-        plt.plot(σ2_m_samples[:, j], label=gene_names[j])
-    plt.legend()
-    plt.figure()
-    for j in range(σ2_f_samples.shape[1]):
-        plt.plot(σ2_f_samples[:, j], label=gene_names[j])
-    plt.legend()
+    plot_noises(σ2_m_samples, σ2_f_samples, gene_names)
+
+    if weight_samples is not None:
+        plot_weights(weight_samples, gene_names)
