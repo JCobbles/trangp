@@ -11,7 +11,7 @@ class GPKernelSelector():
         self.kernel = options.kernel
         self.τ = data.τ        
         self.N_p = data.τ.shape[0]
-        self.num_tfs = data.f_obs.shape[0]
+        self.num_tfs = data.f_obs.shape[1]
         t_1, t_2 = get_time_square(self.τ, self.N_p)
         self.t_dist = t_1-t_2
         self.tt = t_1*t_2
