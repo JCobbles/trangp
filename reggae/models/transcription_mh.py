@@ -4,10 +4,11 @@ import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
 from reggae.mcmc import MetropolisHastings, Parameter
-from ..data_loaders import DataHolder
-from ..utilities import get_rbf_dist, exp, mult, jitter_cholesky
+from reggae.data_loaders import DataHolder
+from reggae.utilities import exp, mult, jitter_cholesky
 from reggae.models.results import GenericResults
-from reggae.models.kernels import FKernel, KbarKernel
+from reggae.mcmc.kernels import FKernel, KbarKernel
+
 import numpy as np
 from scipy.special import expit
 

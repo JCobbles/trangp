@@ -1,5 +1,5 @@
 import numpy as np
-from reggae.utilities import get_rbf_dist, exp, mult, ArrayList, discretise
+from reggae.utilities import exp, ArrayList, discretise
 import tensorflow_probability as tfp
 
 from ipywidgets import IntProgress
