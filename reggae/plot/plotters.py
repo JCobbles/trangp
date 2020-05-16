@@ -27,7 +27,7 @@ def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, true_k_f=None
         S_barenco = S_barenco/np.mean(S_barenco)*np.mean(k_latest[:, 3])
         D_barenco = (np.array([1.2, 1.6, 1.75, 3.2, 2.3])*0.8/3.2)[[0, 4, 2, 3, 1]]
         D_barenco = D_barenco/np.mean(D_barenco)*np.mean(k_latest[:, 2])
-        true_data = np.array([np.zeros(num_genes), B_barenco, S_barenco, D_barenco]).T
+        true_data = np.array([np.zeros(num_genes), B_barenco, D_barenco, S_barenco]).T
     elif true_k is not None:
         true_data = true_k
     plot_labels = ['Initial Conditions', 'Basal rates', 'Decay rates', 'Sensitivities']
