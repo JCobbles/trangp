@@ -96,7 +96,7 @@ def plot_kinetics_convergence(k, k_f):
 
 def plot_genes(data, m_preds, titles, num_hpd=20, replicate=0):
     # num_hpd = max(num_hpd, 20)
-    m_preds = m_preds[:, replicates]
+    m_preds = m_preds[:, replicate]
     plt.figure(figsize=(14, 17))
     plt.suptitle('Genes')
     num_genes = m_preds[0].shape[0]
