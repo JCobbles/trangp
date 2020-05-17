@@ -107,42 +107,50 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
         return True
 
 class FKernel(MetropolisKernel):
-    def __init__(self, 
+    def __init__(self, data,
                  likelihood, 
                  fbar_prior_params, 
-                 num_tfs, num_genes, 
                  tf_mrna_present, 
                  state_indices, 
                  step_size):
         self.fbar_prior_params = fbar_prior_params
-        self.num_tfs = num_tfs
-        self.num_genes = num_genes
+        self.num_tfs = data.f_obs.shape[1]
+        self.num_genes = data.m_obs.shape[1]
         self.likelihood = likelihood
         self.tf_mrna_present = True
         self.state_indices = state_indices
         self.h_f = step_size
-        
+        self.num_replicates = data.f_obs.shape[0]
+
     def one_step(self, current_state, previous_kernel_results, all_states):
         # Untransformed tf mRNA vectors F (Step 1)
-        fbar = current_state
         old_probs = list()
-        # TODO check works with multiple TFs
-        # Gibbs step
-        z_i = tfd.MultivariateNormalDiag(fbar, self.h_f).sample()
+        new_state = tf.identity(current_state)
 
         # MH
         kernel_params = (all_states[self.state_indices['kernel_params']][0], all_states[self.state_indices['kernel_params']][1])
         m, K = self.fbar_prior_params(*kernel_params)
-        for i in range(self.num_tfs):
-            invKsigmaK = tf.matmul(tf.linalg.inv(K[i]+tf.linalg.diag(self.h_f)), K[i]) # (C_i + hI)C_i
-            L = jitter_cholesky(K[i]-tf.matmul(K[i], invKsigmaK))
-            c_mu = tf.matmul(z_i[i, None], invKsigmaK)
-            fstar_i = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
-            mask = np.zeros((self.num_tfs, 1), dtype='float64')
-            mask[i] = 1
-            fstar = (1-mask) * fbar + mask * fstar_i
-            new_prob = self.calculate_probability(fstar, all_states)
-            old_prob = self.calculate_probability(fbar, all_states)
+        for r in range(self.num_replicates):
+            # Gibbs step
+            fbar = current_state[r]
+            z_i = tfd.MultivariateNormalDiag(fbar, self.h_f).sample()
+            fstar = tf.zeros_like(fbar)
+
+            for i in range(self.num_tfs):
+                invKsigmaK = tf.matmul(tf.linalg.inv(K[i]+tf.linalg.diag(self.h_f)), K[i]) # (C_i + hI)C_i
+                L = jitter_cholesky(K[i]-tf.matmul(K[i], invKsigmaK))
+                c_mu = tf.matmul(z_i[i, None], invKsigmaK)
+                fstar_i = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
+                mask = np.zeros((self.num_tfs, 1), dtype='float64')
+                mask[i] = 1
+                fstar = (1-mask) * fstar + mask * fstar_i
+
+            mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
+            mask[r] = 1
+            test_state = (1-mask) * new_state + mask * fstar
+
+            new_prob = self.calculate_probability(test_state, all_states)
+            old_prob = self.calculate_probability(new_state, all_states)
             #previous_kernel_results.target_log_prob #tf.reduce_sum(old_m_likelihood) + old_f_likelihood
 
             is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
@@ -150,10 +158,10 @@ class FKernel(MetropolisKernel):
             prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
 
 
-            fbar = tf.cond(tf.equal(is_accepted, tf.constant(False)),
-                            lambda:fbar, lambda:fstar)
+            new_state = tf.cond(tf.equal(is_accepted, tf.constant(False)),
+                                lambda:new_state, lambda:test_state)
 
-        return fbar, GenericResults(prob, is_accepted[0]) # TODO for multiple TFs
+        return new_state, GenericResults(prob, is_accepted[0]) # TODO for multiple TFs
     
     def calculate_probability(self, fstar, all_states):
         new_m_likelihood = self.likelihood.genes(

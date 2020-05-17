@@ -94,8 +94,9 @@ def plot_kinetics_convergence(k, k_f):
         plt.legend()
 
 
-def plot_genes(titles, m_preds, data, num_hpd=20):
-    num_hpd = max(num_hpd, 20)
+def plot_genes(data, m_preds, titles, num_hpd=20, replicate=0):
+    # num_hpd = max(num_hpd, 20)
+    m_preds = m_preds[:, replicates]
     plt.figure(figsize=(14, 17))
     plt.suptitle('Genes')
     num_genes = m_preds[0].shape[0]
@@ -103,14 +104,14 @@ def plot_genes(titles, m_preds, data, num_hpd=20):
     for j in range(num_genes):
         ax = plt.subplot(531+j)
         plt.title(titles[j])
-        plt.scatter(data.common_indices, data.m_obs[0, j], marker='x', label='Observed')
+        plt.scatter(data.common_indices, data.m_obs[replicate, j], marker='x', label='Observed')
         # plt.errorbar([n*10+n for n in range(7)], Y[j], 2*np.sqrt(Y_var[j]), fmt='none', capsize=5)
 
         for i in range(1, 20):
-            plt.plot(m_preds[-i][j,:], color='grey', alpha=0.5)
+            plt.plot(m_preds[-i,j,:], color='grey', alpha=0.5)
             
         # HPD:
-        bounds = arviz.hpd(m_preds[-num_hpd:, j,:], credible_interval=0.95)
+        bounds = arviz.hpd(m_preds[-num_hpd:,j,:], credible_interval=0.95)
         plt.fill_between(np.arange(N_p), bounds[:, 0], bounds[:, 1], color='grey', alpha=0.3, label='95% credibility interval')
 
         plt.xticks(np.arange(N_p)[data.common_indices.numpy()])
@@ -119,9 +120,10 @@ def plot_genes(titles, m_preds, data, num_hpd=20):
         plt.legend()
     plt.tight_layout()
 
-def plot_tf(data, f_samples, num_hpd=20, plot_barenco=True):
+def plot_tfs(data, f_samples, num_hpd=20, plot_barenco=True, replicate=0):
     t = data.t
     τ = data.τ
+    f_samples = f_samples[:, replicate]
     common_indices = data.common_indices.numpy()
     num_tfs = data.f_obs.shape[1]
     fig = plt.figure(figsize=(13, 7*np.ceil(num_tfs/2)))
@@ -146,7 +148,7 @@ def plot_tf(data, f_samples, num_hpd=20, plot_barenco=True):
             plt.plot(τ, f_i[i], c='cadetblue', alpha=0.5, **kwargs)
 
 
-        plt.scatter(τ[common_indices], data.f_obs[0, i], marker='x', s=60, linewidth=2, color='tab:blue', label='Observed')
+        plt.scatter(τ[common_indices], data.f_obs[replicate, i], marker='x', s=60, linewidth=2, color='tab:blue', label='Observed')
 
         # HPD:
         bounds = arviz.hpd(f_samples[-num_hpd:,i,:], credible_interval=0.95)
@@ -200,13 +202,14 @@ def generate_report(data,
                     plot_barenco=True,
                     true_k=None,
                     true_k_f=None,
-                    num_hpd=20):
+                    num_hpd=20,
+                    replicate=0):
 
     if gene_names is None:
         gene_names = np.arange(data.m_obs.shape[1])
-    plot_tf(data, f_samples, plot_barenco=plot_barenco)
+    plot_tfs(data, f_samples, num_hpd=num_hpd, plot_barenco=plot_barenco, replicate=replicate)
 
-    plot_genes(gene_names, m_preds, data, num_hpd=num_hpd)
+    plot_genes(data, m_preds, gene_names, num_hpd=num_hpd, replicate=replicate)
 
     plot_kinetics_convergence(k_samples, k_f_samples)
 
