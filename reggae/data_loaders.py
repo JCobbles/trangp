@@ -12,6 +12,43 @@ class DataHolder(object):
         self.τ = time[1]
         self.common_indices = time[2]
 
+def load_covid():
+    with open('data/covidrld.csv', 'r', 1) as f:
+        contents = f.buffer
+        df = pd.read_table(contents, sep=',', index_col=0)
+    replicates = 2
+    columns = df.columns
+    #ENSMPUG is the prefix for Ferret
+    known_target_genes = [
+        'ENSMPUG00000000676', #EDN1
+        'ENSMPUG00000002543', #OAS1
+        'ENSMPUG00000013592', #IL6
+        'ENSMPUG00000008689', #CXCL10
+        'ENSMPUG00000008778', #Mx-1
+        'ENSMPUG00000013925', #ISG15
+        'ENSMPUG00000015816', #ISG20
+        'ENSMPUG00000004319', #RIG-I
+    ]
+    known_tfs = [
+        'ENSMPUG00000010522', #IRF1
+        'ENSMPUG00000008845', #IRF7
+        'ENSMPUG00000012530', #STAT1
+        'ENSMPUG00000001431', #STAT2
+    ]
+
+    genes_df = df[df.index.isin(known_target_genes)][columns]
+    tfs_df = df[df.index.isin(known_tfs)][columns]
+
+    #Normalise across time points
+    normalised = preprocessing.normalize(np.r_[genes_df.values,tfs_df.values])
+    genes = normalised[:genes_df.shape[0]]
+    tfs = normalised[genes_df.shape[0]:]
+
+    genes = np.stack([genes[:, [0,2,4,6]], genes[:, [1,3,5,7]]])
+    tfs = np.stack([tfs[:, [0,2,4,6]], tfs[:, [1,3,5,7]]])
+
+    return (genes_df, np.float64(genes)), (tfs_df, np.float64(tfs)), np.array([0, 3, 7, 14])
+
 def load_3day_dros():
     with open('data/3day/GSE47999_Normalized_Counts.txt', 'r', 1) as f:
         contents = f.buffer
