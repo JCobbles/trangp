@@ -6,7 +6,7 @@ import tensorflow_probability as tfp
 from tensorflow_probability import bijectors as tfb
 from tensorflow_probability import distributions as tfd
 
-from reggae.mcmc import MetropolisHastings, MetropolisKernel
+from reggae.mcmc import MetropolisHastings
 from reggae.mcmc.parameter import KernelParameter, Parameter
 from reggae.models.results import GenericResults
 from reggae.models import Options, GPKernelSelector
@@ -35,6 +35,7 @@ class TranscriptionLikelihood():
         if self.options.delays:
             # Add delay 
             Δ = tf.cast(Δ, 'int32')
+
             for r in range(self.num_replicates):
                 f_ir = rotate(f_i[r], -Δ)
                 mask = ~tf.sequence_mask(Δ, f_i.shape[2])
@@ -179,6 +180,7 @@ class TranscriptionMixedSampler():
 
         self.num_tfs = data.f_obs.shape[1] # Number of TFs
         self.num_genes = data.m_obs.shape[1]
+        self.num_replicates = data.m_obs.shape[0]
 
         self.likelihood = TranscriptionLikelihood(data, options)
         self.options = options

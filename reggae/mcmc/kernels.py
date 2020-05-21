@@ -1,9 +1,11 @@
+from abc import abstractmethod
+
 import tensorflow as tf
 from tensorflow import math as tfm
 from tensorflow_probability import distributions as tfd
 import tensorflow_probability as tfp
 
-from reggae.mcmc import MetropolisHastings, Parameter, MetropolisKernel
+from reggae.mcmc import MetropolisHastings, Parameter
 from reggae.models.results import GenericResults, MixedKernelResults
 from reggae.utilities import jitter_cholesky, logit
 
@@ -40,14 +42,7 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
                 previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
                     target_log_prob=self.kernels[i].target_log_prob_fn(current_state)(*wrapped_state_i))
 
-            # if type(current_state[i]) is list:
-            #     self.kernels[i].all_states_hack = [tf.identity(res) for res in current_state]
-            # else:
             self.kernels[i].all_states_hack = current_state
-            # if i == 3:
-            #     tf.print('------')
-            #     tf.print(previous_kernel_results.inner_results[i].target_log_prob)
-            #     tf.print('current logit()', logit(current_state[3]))
 
             args = []
             try:
@@ -61,11 +56,7 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
             except Exception as e:
                 tf.print('Failed at ', i, self.kernels[i], current_state)
                 raise e
-#                 print(result_state, kernel_results)
 
-            # if i == 3:
-            #     tf.print(kernel_results.target_log_prob, kernel_results)
-            #     tf.print('=======')
             if type(result_state) is list:
                 new_state.append([tf.identity(res) for res in result_state])
             else:
@@ -106,6 +97,66 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
     def is_calibrated(self):
         return True
 
+
+class MetropolisKernel(tfp.mcmc.TransitionKernel):
+    def __init__(self, step_size, tune_every=20):
+        self.step_size = tf.Variable(step_size)
+        self.tune_every = 20
+
+    def metropolis_is_accepted(self, new_log_prob, old_log_prob):
+        alpha = tf.math.exp(new_log_prob - old_log_prob)
+        return tf.random.uniform((1,), dtype='float64') < tf.math.minimum(f64(1), alpha)
+    #     if is_tensor(alpha):
+    #         alpha = alpha.numpy()
+    #     return not np.isnan(alpha) and random.random() < min(1, alpha)
+
+    def one_step(self, current_state, previous_kernel_results, all_states):
+        new_state, prob, is_accepted = self._one_step(current_state, previous_kernel_results, all_states)
+
+        acc_rate, iteration = previous_kernel_results.acc_iter
+        acc = acc_rate*iteration
+        iteration += f64(1)
+        acc_rate = tf.cond(tf.equal(is_accepted, tf.constant(True)), 
+                        lambda: (acc+1)/iteration, lambda: acc/iteration)
+        # tf.print(acc_rate, iteration)
+        tf.cond(tf.equal(tfm.floormod(iteration, self.tune_every), 0), lambda: self.tune(acc_rate), lambda:None)
+
+        return new_state, GenericResults(prob, is_accepted, (acc_rate, iteration)) # TODO for multiple TFs
+
+    @abstractmethod
+    def _one_step(self, current_state, previous_kernel_results, all_states):
+        pass
+    
+    def tune(self, acc_rate):
+        """
+        Tunes the scaling parameter for the proposal distribution
+        according to the acceptance rate over the last tune_interval:
+        Rate    Variance adaptation
+        ----    -------------------
+        <0.001        x 0.1
+        <0.05         x 0.5
+        <0.2          x 0.9
+        >0.5          x 1.1
+        >0.75         x 2
+        >0.95         x 10
+        """
+        tf.print(self.step_size)
+        self.step_size.assign(tf.case([
+                (acc_rate < 0.001, lambda: self.step_size * 0.1),
+                (acc_rate < 0.05, lambda: self.step_size * 0.5),
+                (acc_rate < 0.2, lambda: self.step_size * 0.9),
+                (acc_rate > 0.95, lambda: self.step_size * 10.0),
+                (acc_rate > 0.75, lambda: self.step_size * 2.0),
+                (acc_rate > 0.5, lambda: self.step_size * 1.1),
+            ],
+            default=lambda:self.step_size
+        ))
+        tf.print('Updating step_size', self.step_size, 'due to acc rate', acc_rate)
+    
+    def is_calibrated(self):
+        return True
+
+
 class FKernel(MetropolisKernel):
     def __init__(self, data,
                  likelihood, 
@@ -119,10 +170,10 @@ class FKernel(MetropolisKernel):
         self.likelihood = likelihood
         self.tf_mrna_present = True
         self.state_indices = state_indices
-        self.h_f = step_size
         self.num_replicates = data.f_obs.shape[0]
+        super().__init__(step_size, tunable=True)
 
-    def one_step(self, current_state, previous_kernel_results, all_states):
+    def _one_step(self, current_state, previous_kernel_results, all_states):
         # Untransformed tf mRNA vectors F (Step 1)
         old_probs = list()
         new_state = tf.identity(current_state)
@@ -133,11 +184,11 @@ class FKernel(MetropolisKernel):
         for r in range(self.num_replicates):
             # Gibbs step
             fbar = current_state[r]
-            z_i = tfd.MultivariateNormalDiag(fbar, self.h_f).sample()
+            z_i = tfd.MultivariateNormalDiag(fbar, self.step_size).sample()
             fstar = tf.zeros_like(fbar)
 
             for i in range(self.num_tfs):
-                invKsigmaK = tf.matmul(tf.linalg.inv(K[i]+tf.linalg.diag(self.h_f)), K[i]) # (C_i + hI)C_i
+                invKsigmaK = tf.matmul(tf.linalg.inv(K[i]+tf.linalg.diag(self.step_size)), K[i]) # (C_i + hI)C_i
                 L = jitter_cholesky(K[i]-tf.matmul(K[i], invKsigmaK))
                 c_mu = tf.matmul(z_i[i, None], invKsigmaK)
                 fstar_i = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
@@ -161,7 +212,8 @@ class FKernel(MetropolisKernel):
             new_state = tf.cond(tf.equal(is_accepted, tf.constant(False)),
                                 lambda:new_state, lambda:test_state)
 
-        return new_state, GenericResults(prob, is_accepted[0]) # TODO for multiple TFs
+
+        return new_state, prob, is_accepted[0]
     
     def calculate_probability(self, fstar, all_states):
         new_m_likelihood = self.likelihood.genes(
@@ -217,6 +269,7 @@ class DeltaKernel(tfp.mcmc.TransitionKernel):
                     #         Δ=test_state,
                     #     )) + tf.reduce_sum(self.prior.log_prob(Δ)))
                     # else:
+
                     probs.append(tf.reduce_sum(self.likelihood.genes(
                         all_states=all_states, 
                         state_indices=self.state_indices,
@@ -226,6 +279,7 @@ class DeltaKernel(tfp.mcmc.TransitionKernel):
                 # start_index = tf.reduce_max([self.lower, curri-2])
                 # probs = tf.gather(probs, tf.range(start_index, 
                 #                                   tf.reduce_min([self.upper+1, curri+3])))
+
                 probs =  tf.stack(probs) - tfm.reduce_max(probs)
                 probs = tfm.exp(probs)
                 probs = probs / tfm.reduce_sum(probs)
@@ -237,7 +291,7 @@ class DeltaKernel(tfp.mcmc.TransitionKernel):
                 new_state = (1-mask) * new_state + mask * chosen
             return new_state
 #         tf.print('final chosen state', new_state)
-        new_state = tf.cond(iteration_number < 500, lambda: current_state, lambda: proceed())
+        new_state = tf.cond(iteration_number < 200, lambda: current_state, lambda: proceed())
         return new_state, GenericResults([iteration_number+1], True)
 
     def bootstrap_results(self, init_state, all_states):
