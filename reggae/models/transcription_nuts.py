@@ -88,6 +88,22 @@ class TranscriptionLikelihood():
 
         return m_pred
 
+    def get_parameters_from_state(self, all_states, state_indices,
+                                  fbar=None, k_fbar=None, kbar=None, 
+                                  w=None, w_0=None, σ2_m=None, Δ=None):
+        k_fbar = all_states[state_indices['kinetics']][1] if k_fbar is None else k_fbar
+        fbar = all_states[state_indices['fbar']] if fbar is None else fbar
+        kbar = all_states[state_indices['kinetics']][0] if kbar is None else kbar
+        # w = 1*tf.ones((self.num_genes, self.num_tfs), dtype='float64') # TODO
+        # w_0 = tf.zeros(self.num_genes, dtype='float64') # TODO
+        w = all_states[state_indices['weights']][0] if w is None else w
+        w_0 = all_states[state_indices['weights']][1] if w_0 is None else w_0
+        σ2_m = all_states[state_indices['σ2_m']] if σ2_m is None else σ2_m
+        Δ = None
+        if self.options.delays:
+            Δ = all_states[state_indices['Δ']] if Δ is None else Δ
+        return fbar, k_fbar, kbar, w, w_0, σ2_m, Δ
+
     def genes(self, all_states=None, state_indices=None,
               k_fbar=None,
               fbar=None, 
@@ -101,32 +117,25 @@ class TranscriptionLikelihood():
         If any of the optional args are None, they are replaced by their 
         current value in all_states.
         '''
+        fbar, k_fbar, kbar, w, w_0, σ2_m, Δ = self.get_parameters_from_state(
+            all_states, state_indices, fbar, k_fbar, kbar, w, w_0, σ2_m, Δ)
 
-        k_fbar = all_states[state_indices['kinetics']][1] if k_fbar is None else k_fbar
-        fbar = all_states[state_indices['fbar']] if fbar is None else fbar
-        kbar = all_states[state_indices['kinetics']][0] if kbar is None else kbar
-        # w = 1*tf.ones((self.num_genes, self.num_tfs), dtype='float64') # TODO
-        # w_0 = tf.zeros(self.num_genes, dtype='float64') # TODO
-        w = all_states[state_indices['weights']][0] if w is None else w
-        w_0 = all_states[state_indices['weights']][1] if w_0 is None else w_0
-        σ2_m = all_states[state_indices['σ2_m']] if σ2_m is None else σ2_m
-        if self.options.delays:
-            Δ = all_states[state_indices['Δ']] if Δ is None else Δ
-        lik, sq_diff = self._genes(k_fbar, fbar, kbar, w, w_0, σ2_m, Δ)
+        lik, sq_diff = self._genes(fbar, k_fbar, kbar, w, w_0, σ2_m, Δ)
 
         if return_sq_diff:
             return lik, sq_diff
         return lik
 
     @tf.function
-    def _genes(self, k_fbar, fbar, kbar, w, w_0, σ2_m, Δ=None):
+    def _genes(self, fbar, k_fbar, kbar, w, w_0, σ2_m, Δ=None):
         m_pred = self.predict_m(kbar, k_fbar, w, fbar, w_0, Δ)
         sq_diff = tfm.square(self.data.m_obs - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
         sq_diff = tf.reduce_sum(sq_diff, axis=0)
-        variance = logit(tf.reshape(σ2_m, (-1, 1)))
+        variance = tf.reshape(σ2_m, (-1, 1))
         if self.preprocessing_variance:
-            variance = variance + self.data.σ2_m_pre # add PUMA variance
-#         print(variance.shape, sq_diff.shape)
+            variance = logit(variance) + self.data.σ2_m_pre # add PUMA variance
+        # print(variance.shape, sq_diff.shape)
+        # tf.print(variance)
         log_lik = -0.5*tfm.log(2*np.pi*(variance)) - 0.5*sq_diff/variance
         log_lik = tf.reduce_sum(log_lik, axis=1)
         return log_lik, sq_diff
@@ -251,13 +260,20 @@ class TranscriptionMixedSampler():
                       [LogisticNormal(*kernel_ranges[0]), LogisticNormal(*kernel_ranges[1])],
                     #   [0.76*tf.ones(self.num_tfs, dtype='float64'), 0.94*tf.ones(self.num_tfs, dtype='float64')], 
                       kernel_initial, 
-                      step_size=logistic_step_size, hmc_log_prob=kernel_params_log_prob, requires_all_states=True)
+                      step_size=0.1*logistic_step_size, hmc_log_prob=kernel_params_log_prob, requires_all_states=True)
 
 
         # White noise for genes
         if not options.preprocessing_variance:
-            σ2_m_kernel = GibbsKernel(data, options, self.likelihood, tfd.InverseGamma(f64(0.01), f64(0.01)), self.state_indices)
-            σ2_m = KernelParameter('σ2_m', None, f64(1e-3), kernel=σ2_m_kernel)
+            def m_sq_diff_fn(all_states):
+                fbar, k_fbar, kbar, w, w_0, σ2_m, Δ = self.likelihood.get_parameters_from_state(all_states, self.state_indices)
+                m_pred = self.likelihood.predict_m(kbar, k_fbar, w, fbar, w_0, Δ)
+                sq_diff = tfm.square(self.data.m_obs - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
+                return tf.reduce_sum(sq_diff, axis=0)
+
+            σ2_m_kernel = GibbsKernel(data, options, self.likelihood, tfd.InverseGamma(f64(0.01), f64(0.01)), 
+                                      self.state_indices, m_sq_diff_fn)
+            σ2_m = KernelParameter('σ2_m', None, 1e-3*tf.ones((self.num_genes, 1), dtype='float64'), kernel=σ2_m_kernel)
         else:
             def σ2_m_log_prob(all_states):
                 def σ2_m_log_prob_fn(σ2_mstar):
@@ -306,7 +322,12 @@ class TranscriptionMixedSampler():
                         kernel=delta_kernel, requires_all_states=False)
         
         if not options.preprocessing_variance:
-            kernel = GibbsKernel(data, options, self.likelihood, tfd.InverseGamma(f64(0.01), f64(0.01)), self.state_indices)
+            def f_sq_diff_fn(all_states):
+                f_pred = tfm.log(1+tfm.exp(all_states[self.state_indices['fbar']]))
+                sq_diff = tfm.square(self.data.f_obs - tf.transpose(tf.gather(tf.transpose(f_pred),self.data.common_indices)))
+                return tf.reduce_sum(sq_diff, axis=0)
+            kernel = GibbsKernel(data, options, self.likelihood, tfd.InverseGamma(f64(0.01), f64(0.01)), 
+                                 self.state_indices, f_sq_diff_fn)
             σ2_f = KernelParameter('σ2_f', None, 1e-4*tf.ones((self.num_tfs,1), dtype='float64'), kernel=kernel)
             self.params = TupleParams_pre(fbar, σ2_m, weights, kernel_params, Δ, kinetics, σ2_f)
         else:
