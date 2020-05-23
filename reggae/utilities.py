@@ -61,6 +61,9 @@ def jitter_cholesky(A):
         jitter2 = linalg.diag(1e-5 * np.ones(A.shape[0]))
         return linalg.cholesky(A + jitter2)
 
+def inverse_positivity(fbar):
+    return np.log(1+np.exp(fbar))
+
 class ArrayList:
     def __init__(self, shape):
         self.capacity = 100

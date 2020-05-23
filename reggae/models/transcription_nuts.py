@@ -187,7 +187,8 @@ class TranscriptionMixedSampler():
         self.kernel_selector = GPKernelSelector(data, options)
 
         self.state_indices = {}
-        logistic_step_size = 0.0001
+        step_sizes = self.options.initial_step_sizes
+        logistic_step_size = step_sizes['nuts'] if 'nuts' in step_sizes else 0.00001
 
         # Interaction weights
         def w_log_prob(all_states):

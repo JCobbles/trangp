@@ -101,7 +101,7 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
 class MetropolisKernel(tfp.mcmc.TransitionKernel):
     def __init__(self, step_size, tune_every=20):
         self.step_size = tf.Variable(step_size)
-        self.tune_every = 20
+        self.tune_every = tune_every
 
     def metropolis_is_accepted(self, new_log_prob, old_log_prob):
         alpha = tf.math.exp(new_log_prob - old_log_prob)
@@ -133,16 +133,15 @@ class MetropolisKernel(tfp.mcmc.TransitionKernel):
         according to the acceptance rate over the last tune_interval:
         Rate    Variance adaptation
         ----    -------------------
-        <0.001        x 0.1
+        <0.01        x 0.1
         <0.05         x 0.5
         <0.2          x 0.9
         >0.5          x 1.1
         >0.75         x 2
         >0.95         x 10
         """
-        tf.print(self.step_size)
         self.step_size.assign(tf.case([
-                (acc_rate < 0.001, lambda: self.step_size * 0.1),
+                (acc_rate < 0.01, lambda: self.step_size * 0.1),
                 (acc_rate < 0.05, lambda: self.step_size * 0.5),
                 (acc_rate < 0.2, lambda: self.step_size * 0.9),
                 (acc_rate > 0.95, lambda: self.step_size * 10.0),
@@ -151,7 +150,7 @@ class MetropolisKernel(tfp.mcmc.TransitionKernel):
             ],
             default=lambda:self.step_size
         ))
-        tf.print('Updating step_size', self.step_size, 'due to acc rate', acc_rate)
+        # tf.print('Updating step_size', self.step_size[0], 'due to acc rate', acc_rate)
     
     def is_calibrated(self):
         return True
@@ -171,7 +170,7 @@ class FKernel(MetropolisKernel):
         self.tf_mrna_present = True
         self.state_indices = state_indices
         self.num_replicates = data.f_obs.shape[0]
-        super().__init__(step_size, tunable=True)
+        super().__init__(step_size, tune_every=2)
 
     def _one_step(self, current_state, previous_kernel_results, all_states):
         # Untransformed tf mRNA vectors F (Step 1)

@@ -20,18 +20,18 @@ def load_covid():
     columns = df.columns
     #ENSMPUG is the prefix for Ferret
     known_target_genes = [
-        'ENSMPUG00000000676', #EDN1
+        # 'ENSMPUG00000000676', #EDN1 
         'ENSMPUG00000002543', #OAS1
         'ENSMPUG00000013592', #IL6
-        'ENSMPUG00000008689', #CXCL10
+        # 'ENSMPUG00000008689', #CXCL10
         'ENSMPUG00000008778', #Mx-1
         'ENSMPUG00000013925', #ISG15
         'ENSMPUG00000015816', #ISG20
-        'ENSMPUG00000004319', #RIG-I
+        # 'ENSMPUG00000004319', #RIG-I
     ]
     known_tfs = [
-        'ENSMPUG00000010522', #IRF1
-        'ENSMPUG00000008845', #IRF7
+        # 'ENSMPUG00000010522', #IRF1
+        # 'ENSMPUG00000008845', #IRF7
         'ENSMPUG00000012530', #STAT1
         'ENSMPUG00000001431', #STAT2
     ]
