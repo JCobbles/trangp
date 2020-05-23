@@ -108,7 +108,7 @@ def plot_genes(data, m_preds, titles, num_hpd=20, replicate=0):
         # plt.errorbar([n*10+n for n in range(7)], Y[j], 2*np.sqrt(Y_var[j]), fmt='none', capsize=5)
 
         for i in range(1, 20):
-            plt.plot(m_preds[-i,j,:], color='grey', alpha=0.5)
+            plt.plot(τ, m_preds[-i,j,:], color='grey', alpha=0.5)
             
         # HPD:
         bounds = arviz.hpd(m_preds[-num_hpd:,j,:], credible_interval=0.95)

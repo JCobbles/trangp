@@ -175,22 +175,38 @@ class FKernel(MetropolisKernel):
     def _one_step(self, current_state, previous_kernel_results, all_states):
         # Untransformed tf mRNA vectors F (Step 1)
         old_probs = list()
-        new_state = tf.identity(current_state)
-
+        new_state = tf.identity(current_state[0])
+        new_params = []
+        S = tf.linalg.diag(self.step_size)
+        l2_prior = tfd.Uniform(3.5, 10)
+        v_prior = tfd.InverseGamma(0.01, 0.01)
         # MH
-        kernel_params = (all_states[self.state_indices['kernel_params']][0], all_states[self.state_indices['kernel_params']][1])
-        m, K = self.fbar_prior_params(*kernel_params)
+        m, K = self.fbar_prior_params(current_state[1], current_state[2])
+        # Propose new params
+        v = tfd.TruncatedNormal(current_state[1], 0.07, low=0, high=100).sample()
+        l2 = tfd.TruncatedNormal(current_state[2], 0.07, low=0, high=100).sample()
+        m_, K_ = self.fbar_prior_params(v, l2)
+
         for r in range(self.num_replicates):
             # Gibbs step
-            fbar = current_state[r]
+            fbar = new_state[r]
             z_i = tfd.MultivariateNormalDiag(fbar, self.step_size).sample()
             fstar = tf.zeros_like(fbar)
 
             for i in range(self.num_tfs):
-                invKsigmaK = tf.matmul(tf.linalg.inv(K[i]+tf.linalg.diag(self.step_size)), K[i]) # (C_i + hI)C_i
+                # Compute (K_i + S)^-1 K_i
+                invKsigmaK = tf.matmul(tf.linalg.inv(K[i]+S), K[i]) 
                 L = jitter_cholesky(K[i]-tf.matmul(K[i], invKsigmaK))
+                # print(invKsigmaK.shape)
                 c_mu = tf.matmul(z_i[i, None], invKsigmaK)
-                fstar_i = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
+                # Compute nu = L^-1 (f-mu)
+                invL = tf.linalg.inv(L)
+                nu = tf.linalg.matvec(invL, fbar-c_mu)
+
+                invKsigmaK = tf.matmul(tf.linalg.inv(K_[i]+S), K_[i]) 
+                L = jitter_cholesky(K_[i]-tf.matmul(K_[i], invKsigmaK))
+                c_mu = tf.matmul(z_i[i, None], invKsigmaK)
+                fstar_i = tf.linalg.matvec(L, nu) + c_mu
                 mask = np.zeros((self.num_tfs, 1), dtype='float64')
                 mask[i] = 1
                 fstar = (1-mask) * fstar + mask * fstar_i
@@ -199,8 +215,8 @@ class FKernel(MetropolisKernel):
             mask[r] = 1
             test_state = (1-mask) * new_state + mask * fstar
 
-            new_prob = self.calculate_probability(test_state, all_states)
-            old_prob = self.calculate_probability(new_state, all_states)
+            new_prob = self.calculate_probability([test_state, v, l2], all_states)
+            old_prob = self.calculate_probability([new_state, current_state[1], current_state[2]], all_states)
             #previous_kernel_results.target_log_prob #tf.reduce_sum(old_m_likelihood) + old_f_likelihood
 
             is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
@@ -210,20 +226,21 @@ class FKernel(MetropolisKernel):
 
             new_state = tf.cond(tf.equal(is_accepted, tf.constant(False)),
                                 lambda:new_state, lambda:test_state)
+            new_params = tf.cond(tf.equal(is_accepted, tf.constant(False)),
+                                 lambda:[current_state[1], current_state[2]], lambda:[v, l2])
 
-
-        return new_state, prob, is_accepted[0]
+        return [new_state, *new_params], prob, is_accepted[0]
     
     def calculate_probability(self, fstar, all_states):
         new_m_likelihood = self.likelihood.genes(
             all_states,
             self.state_indices,
-            fbar=fstar,
+            latents=fstar,
         )
         new_f_likelihood = tf.cond(tf.equal(self.tf_mrna_present, tf.constant(True)), 
                                    lambda:tf.reduce_sum(self.likelihood.tfs(
                                        1e-6*tf.ones(self.num_tfs, dtype='float64'), # TODO
-                                       fstar
+                                       fstar[0]
                                    )), lambda:f64(0))
         new_prob = tf.reduce_sum(new_m_likelihood) + new_f_likelihood
         return new_prob
