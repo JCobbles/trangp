@@ -150,7 +150,7 @@ class MetropolisKernel(tfp.mcmc.TransitionKernel):
             ],
             default=lambda:self.step_size
         ))
-        # tf.print('Updating step_size', self.step_size[0], 'due to acc rate', acc_rate)
+        tf.print('Updating step_size', self.step_size[0], 'due to acc rate', acc_rate, '\r', end='')
     
     def is_calibrated(self):
         return True
@@ -159,18 +159,20 @@ class MetropolisKernel(tfp.mcmc.TransitionKernel):
 class FKernel(MetropolisKernel):
     def __init__(self, data,
                  likelihood, 
-                 fbar_prior_params, 
+                 fbar_prior_params,
+                 kernel_priors, 
                  tf_mrna_present, 
                  state_indices, 
                  step_size):
         self.fbar_prior_params = fbar_prior_params
+        self.kernel_priors = kernel_priors
         self.num_tfs = data.f_obs.shape[1]
         self.num_genes = data.m_obs.shape[1]
         self.likelihood = likelihood
         self.tf_mrna_present = True
         self.state_indices = state_indices
         self.num_replicates = data.f_obs.shape[0]
-        super().__init__(step_size, tune_every=2)
+        super().__init__(step_size, tune_every=20)
 
     def _one_step(self, current_state, previous_kernel_results, all_states):
         # Untransformed tf mRNA vectors F (Step 1)
@@ -178,8 +180,6 @@ class FKernel(MetropolisKernel):
         new_state = tf.identity(current_state[0])
         new_params = []
         S = tf.linalg.diag(self.step_size)
-        l2_prior = tfd.Uniform(3.5, 10)
-        v_prior = tfd.InverseGamma(0.01, 0.01)
         # MH
         m, K = self.fbar_prior_params(current_state[1], current_state[2])
         # Propose new params
@@ -215,8 +215,8 @@ class FKernel(MetropolisKernel):
             mask[r] = 1
             test_state = (1-mask) * new_state + mask * fstar
 
-            new_prob = self.calculate_probability([test_state, v, l2], all_states)
-            old_prob = self.calculate_probability([new_state, current_state[1], current_state[2]], all_states)
+            new_prob = self.calculate_probability(test_state, [v, l2], all_states)
+            old_prob = self.calculate_probability(new_state, [current_state[1], current_state[2]], all_states)
             #previous_kernel_results.target_log_prob #tf.reduce_sum(old_m_likelihood) + old_f_likelihood
 
             is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
@@ -231,22 +231,26 @@ class FKernel(MetropolisKernel):
 
         return [new_state, *new_params], prob, is_accepted[0]
     
-    def calculate_probability(self, fstar, all_states):
+    def calculate_probability(self, fstar, kernel_params, all_states):
         new_m_likelihood = self.likelihood.genes(
             all_states,
             self.state_indices,
-            latents=fstar,
+            fbar=fstar,
         )
         new_f_likelihood = tf.cond(tf.equal(self.tf_mrna_present, tf.constant(True)), 
                                    lambda:tf.reduce_sum(self.likelihood.tfs(
                                        1e-6*tf.ones(self.num_tfs, dtype='float64'), # TODO
-                                       fstar[0]
+                                       fstar
                                    )), lambda:f64(0))
         new_prob = tf.reduce_sum(new_m_likelihood) + new_f_likelihood
+        # new_prob += tf.reduce_sum(
+        #     self.kernel_priors[0].log_prob(kernel_params[0]) + \
+        #     self.kernel_priors[1].log_prob(kernel_params[1])
+        # )
         return new_prob
 
     def bootstrap_results(self, init_state, all_states):
-        prob = self.calculate_probability(init_state, all_states)
+        prob = self.calculate_probability(init_state[0], [init_state[1], init_state[2]], all_states)
 
         return GenericResults(prob, True)
     

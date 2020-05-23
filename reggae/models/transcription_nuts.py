@@ -90,10 +90,10 @@ class TranscriptionLikelihood():
         return m_pred
 
     def get_parameters_from_state(self, all_states, state_indices,
-                                  latents=None, k_fbar=None, kbar=None, 
+                                  fbar=None, k_fbar=None, kbar=None, 
                                   w=None, w_0=None, σ2_m=None, Δ=None):
         k_fbar = all_states[state_indices['kinetics']][1] if k_fbar is None else k_fbar
-        latents = all_states[state_indices['latents']] if latents is None else latents
+        fbar = all_states[state_indices['latents']][0] if fbar is None else fbar
         kbar = all_states[state_indices['kinetics']][0] if kbar is None else kbar
         # w = 1*tf.ones((self.num_genes, self.num_tfs), dtype='float64') # TODO
         # w_0 = tf.zeros(self.num_genes, dtype='float64') # TODO
@@ -103,12 +103,12 @@ class TranscriptionLikelihood():
         Δ = None
         if self.options.delays:
             Δ = all_states[state_indices['Δ']] if Δ is None else Δ
-        return latents, k_fbar, kbar, w, w_0, σ2_m, Δ
+        return fbar, k_fbar, kbar, w, w_0, σ2_m, Δ
 
     def genes(self, all_states=None, state_indices=None,
               k_fbar=None,
-              latents=None, 
               kbar=None, 
+              fbar=None, 
               w=None,
               w_0=None,
               σ2_m=None, 
@@ -118,9 +118,9 @@ class TranscriptionLikelihood():
         If any of the optional args are None, they are replaced by their 
         current value in all_states.
         '''
-        latents, k_fbar, kbar, w, w_0, σ2_m, Δ = self.get_parameters_from_state(
-            all_states, state_indices, latents, k_fbar, kbar, w, w_0, σ2_m, Δ)
-        fbar = latents[0]
+        fbar, k_fbar, kbar, w, w_0, σ2_m, Δ = self.get_parameters_from_state(
+            all_states, state_indices, fbar, k_fbar, kbar, w, w_0, σ2_m, Δ)
+
         lik, sq_diff = self._genes(fbar, k_fbar, kbar, w, w_0, σ2_m, Δ)
 
         if return_sq_diff:
@@ -212,10 +212,12 @@ class TranscriptionMixedSampler():
         # Latent function & GP hyperparameters
         kernel_initial = self.kernel_selector.initial_params()
         kernel_ranges = self.kernel_selector.ranges()
+        kernel_priors = self.kernel_selector.priors()
 
         f_step_size = step_sizes['latents'] if 'latents' in step_sizes else 0.1
         fbar_kernel = FKernel(data, self.likelihood, 
-                              self.kernel_selector(), 
+                              self.kernel_selector(),
+                              kernel_priors,
                               self.options.tf_mrna_present, 
                               self.state_indices,
                               f_step_size*tf.ones(self.N_p, dtype='float64'))

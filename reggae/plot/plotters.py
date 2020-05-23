@@ -104,15 +104,15 @@ def plot_genes(data, m_preds, titles, num_hpd=20, replicate=0):
     for j in range(num_genes):
         ax = plt.subplot(531+j)
         plt.title(titles[j])
-        plt.scatter(data.common_indices, data.m_obs[replicate, j], marker='x', label='Observed')
+        plt.scatter(data.τ[data.common_indices.numpy()], data.m_obs[replicate, j], marker='x', label='Observed')
         # plt.errorbar([n*10+n for n in range(7)], Y[j], 2*np.sqrt(Y_var[j]), fmt='none', capsize=5)
 
         for i in range(1, 20):
-            plt.plot(τ, m_preds[-i,j,:], color='grey', alpha=0.5)
+            plt.plot(data.τ, m_preds[-i,j,:], color='grey', alpha=0.5)
             
         # HPD:
         bounds = arviz.hpd(m_preds[-num_hpd:,j,:], credible_interval=0.95)
-        plt.fill_between(np.arange(N_p), bounds[:, 0], bounds[:, 1], color='grey', alpha=0.3, label='95% credibility interval')
+        plt.fill_between(data.τ, bounds[:, 0], bounds[:, 1], color='grey', alpha=0.3, label='95% credibility interval')
 
         plt.xticks(data.t)
         ax.set_xticklabels(data.t)
