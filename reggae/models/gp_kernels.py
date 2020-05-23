@@ -2,6 +2,7 @@ from reggae.utilities import get_time_square
 
 import tensorflow as tf
 from tensorflow import math as tfm
+from tensorflow_probability import distributions as tfd
 import numpy as np
 
 f64 = np.float64
@@ -19,10 +20,15 @@ class GPKernelSelector():
         self.tprime2 = tf.square(t_2)
 
         min_dist = min(data.t[1:]-data.t[:-1])
+        min_dist = min(min_dist, 2)
         self._ranges = {
-            'rbf': [(f64(1e-4), f64(1+max(np.var(data.f_obs, axis=2)))),
+            'rbf': [(f64(1e-4), f64(5)), #1+max(np.var(data.f_obs, axis=2))
                     (f64(min_dist**2)-0.2, f64(data.t[-1]**2))],
             'mlp': [(f64(1), f64(10)), (f64(3.5), f64(20))],
+        }
+        self._priors = {
+            'rbf': [tfd.Uniform(f64(3.5), f64(10)), tfd.InverseGamma(f64(0.01), f64(0.01))],
+            'mlp': [tfd.Uniform(f64(3.5), f64(10)), tfd.InverseGamma(f64(0.01), f64(0.01))],
         }
 
     def __call__(self):
@@ -35,13 +41,16 @@ class GPKernelSelector():
 
     def initial_params(self):
         if self.kernel == 'rbf':
-            return [0.8*tf.ones(self.num_tfs, dtype='float64'), 
-                    0.98*tf.ones(self.num_tfs, dtype='float64')]
+            return [100*tf.ones(self.num_tfs, dtype='float64'), 
+                    4*tf.ones(self.num_tfs, dtype='float64')]
         elif self.kernel == 'mlp':
             return [0.8*tf.ones(self.num_tfs, dtype='float64'), 
                     0.98*tf.ones(self.num_tfs, dtype='float64')]
     def ranges(self):
         return self._ranges[self.kernel]
+
+    def priors(self):
+        return self._priors[self.kernel]
 
     def rbf(self, v, l2):
         sq_dist = tf.divide(tfm.square(self.t_dist), tf.reshape(2*l2, (-1, 1, 1)))
