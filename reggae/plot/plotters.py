@@ -114,8 +114,9 @@ def plot_genes(data, m_preds, titles, num_hpd=20, replicate=0):
         bounds = arviz.hpd(m_preds[-num_hpd:,j,:], credible_interval=0.95)
         plt.fill_between(np.arange(N_p), bounds[:, 0], bounds[:, 1], color='grey', alpha=0.3, label='95% credibility interval')
 
-        plt.xticks(np.arange(N_p)[data.common_indices.numpy()])
-        ax.set_xticklabels(np.arange(data.t[-1]))
+        plt.xticks(data.t)
+        ax.set_xticklabels(data.t)
+
         plt.xlabel('Time (h)')
         plt.legend()
     plt.tight_layout()

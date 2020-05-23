@@ -229,11 +229,12 @@ class TranscriptionMixedSampler():
                 return new_prob
             return fbar_log_prob_fn
 
+        f_step_size = step_sizes['fbar'] if 'fbar' in step_sizes else 0.1
         fbar_kernel = FKernel(data, self.likelihood, 
                               self.fbar_prior_params, 
                               self.options.tf_mrna_present, 
                               self.state_indices,
-                              0.1*tf.ones(self.N_p, dtype='float64'))
+                              f_step_size*tf.ones(self.N_p, dtype='float64'))
         fbar_initial = 0.5*tf.ones((self.num_replicates, self.num_tfs, self.N_p), dtype='float64')
         if self.options.latent_function_metropolis:
             fbar = KernelParameter('fbar', self.fbar_prior, fbar_initial,
