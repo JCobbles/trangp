@@ -8,7 +8,7 @@ from tensorflow_probability import distributions as tfd
 
 from reggae.mcmc import MetropolisHastings
 from reggae.mcmc.parameter import KernelParameter, Parameter
-from reggae.models.results import GenericResults
+from reggae.models.results import GenericResults, SampleResults
 from reggae.models import Options, GPKernelSelector
 from reggae.mcmc.kernels import FKernel, MixedKernel, DeltaKernel, GibbsKernel
 from reggae.data_loaders import DataHolder
@@ -330,13 +330,6 @@ class TranscriptionMixedSampler():
     def sample(self, T=2000, store_every=10, burn_in=1000, report_every=100, num_chains=4):
         print('----- Sampling Begins -----')
         
-        params = self.params
-        progbar = tf.keras.utils.Progbar(
-            100, width=30, verbose=1, interval=0.05, stateful_metrics=None,
-            unit_name='step'
-        )
-
-
         kernels = [param.kernel for param in self.active_params]
 #         if self.options.tf_mrna_present:
         send_all_states = [param.requires_all_states for param in self.active_params]
@@ -379,10 +372,26 @@ class TranscriptionMixedSampler():
         if not add_to_previous:
             self.samples = samples     
         self.is_accepted = is_accepted
+        print()
         print('----- Finished -----')
         return samples, is_accepted
         
-            
+    def results(self):
+        σ2_m = self.samples[self.state_indices['σ2_m']]
+        if self.options.preprocessing_variance:
+            σ2_f = None
+            σ2_m = logit(σ2_m)
+        else:
+            σ2_f = self.samples[self.state_indices['σ2_f']]
+
+        kbar = self.samples[self.state_indices['kinetics']][0].numpy()
+        k_fbar = self.samples[self.state_indices['kinetics']][1].numpy()
+        fbar = self.samples[self.state_indices['latents']][0]
+        kernel_params = self.samples[self.state_indices['latents']][1:]
+        w = self.samples[self.state_indices['weights']][0]
+        w_0 = self.samples[self.state_indices['weights']][1]
+        return SampleResults(fbar, kbar, k_fbar, σ2_m, kernel_params, w, w_0, σ2_f)
+
     @staticmethod
     def initialise_from_state(args, state):
         model = TranscriptionMixedSampler(*args)

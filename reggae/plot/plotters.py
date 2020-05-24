@@ -2,6 +2,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 import arviz
 from reggae.data_loaders import scaled_barenco_data
+from reggae.models.results import SampleResults
 
 def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, true_k_f=None, num_avg=50, num_hpd=120):
     k_latest = np.mean(k[-num_avg:], axis=0)
@@ -190,14 +191,8 @@ def plot_weights(weights, gene_names):
     plt.title('Interaction bias')
 
 def generate_report(data, 
-                    k_samples, 
-                    k_f_samples, 
-                    f_samples, 
-                    σ2_m_samples,
-                    σ2_f_samples,
-                    rbf_param_samples,
+                    results: SampleResults, 
                     m_preds,
-                    weight_samples,
                     gene_names=None,
                     num_avg=20,
                     plot_barenco=True,
@@ -208,24 +203,24 @@ def generate_report(data,
 
     if gene_names is None:
         gene_names = np.arange(data.m_obs.shape[1])
-    plot_tfs(data, f_samples, num_hpd=num_hpd, plot_barenco=plot_barenco, replicate=replicate)
+    plot_tfs(data, results.f, num_hpd=num_hpd, plot_barenco=plot_barenco, replicate=replicate)
 
     plot_genes(data, m_preds, gene_names, num_hpd=num_hpd, replicate=replicate)
 
-    plot_kinetics_convergence(k_samples, k_f_samples)
+    plot_kinetics_convergence(results.k, results.k_f)
 
-    plot_kinetics(gene_names, k_samples, k_f_samples, true_k=true_k, true_k_f=true_k_f, 
+    plot_kinetics(gene_names, results.k, results.k_f, true_k=true_k, true_k_f=true_k_f, 
                   num_avg=num_avg, num_hpd=num_hpd, plot_barenco=plot_barenco)
                   
     plt.figure(figsize=(10, 4))
     plotnum = 0
-    for name, param in (zip(['V', 'L'], rbf_param_samples)):
+    for name, param in (zip(['Param 1', 'Param 2'], results.kern)):
         ax = plt.subplot(221+plotnum)
         plt.plot(param)
         ax.set_title(name)
         plotnum+=1
 
-    plot_noises(σ2_m_samples, σ2_f_samples, gene_names)
+    plot_noises(results.σ2_m, results.σ2_f, gene_names)
 
-    if weight_samples is not None:
-        plot_weights(weight_samples, gene_names)
+    if results.weights is not None:
+        plot_weights(results.weights, gene_names)
