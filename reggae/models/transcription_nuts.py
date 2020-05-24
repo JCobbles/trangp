@@ -211,8 +211,6 @@ class TranscriptionMixedSampler():
 
         # Latent function & GP hyperparameters
         kernel_initial = self.kernel_selector.initial_params()
-        kernel_ranges = self.kernel_selector.ranges()
-        kernel_priors = self.kernel_selector.priors()
 
         f_step_size = step_sizes['latents'] if 'latents' in step_sizes else 0.1
         fbar_kernel = FKernel(data, self.likelihood, 
@@ -225,12 +223,8 @@ class TranscriptionMixedSampler():
             0.3*tf.ones((self.num_replicates, self.num_tfs, self.N_p), dtype='float64'),
             *kernel_initial
         ]
-        if self.options.latent_function_metropolis:
-            fbar = KernelParameter('latents', self.fbar_prior, fbar_initial,
-                                   kernel=fbar_kernel, requires_all_states=False)
-        else:
-            fbar = KernelParameter('latents', self.fbar_prior, fbar_initial, hmc_log_prob=fbar_log_prob,
-                                   requires_all_states=True, step_size=logistic_step_size)
+        fbar = KernelParameter('latents', self.fbar_prior, fbar_initial,
+                                kernel=fbar_kernel, requires_all_states=False)
 
         # White noise for genes
         if not options.preprocessing_variance:

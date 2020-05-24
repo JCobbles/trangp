@@ -128,18 +128,6 @@ class MetropolisKernel(tfp.mcmc.TransitionKernel):
         pass
     
     def tune(self, acc_rate):
-        """
-        Tunes the scaling parameter for the proposal distribution
-        according to the acceptance rate over the last tune_interval:
-        Rate    Variance adaptation
-        ----    -------------------
-        <0.01        x 0.1
-        <0.05         x 0.5
-        <0.2          x 0.9
-        >0.5          x 1.1
-        >0.75         x 2
-        >0.95         x 10
-        """
         self.step_size.assign(tf.case([
                 (acc_rate < 0.01, lambda: self.step_size * 0.1),
                 (acc_rate < 0.05, lambda: self.step_size * 0.5),

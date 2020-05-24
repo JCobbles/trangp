@@ -214,7 +214,7 @@ def generate_report(data,
                   
     plt.figure(figsize=(10, 4))
     plotnum = 0
-    for name, param in (zip(['Param 1', 'Param 2'], results.kern)):
+    for name, param in (zip(['Param 1', 'Param 2'], results.kernel_params)):
         ax = plt.subplot(221+plotnum)
         plt.plot(param)
         ax.set_title(name)
