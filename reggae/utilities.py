@@ -62,7 +62,7 @@ def jitter_cholesky(A):
         return linalg.cholesky(A + jitter2)
 
 def inverse_positivity(fbar):
-    return np.log(1+np.exp(fbar))
+    return tfm.log(1+tfm.exp(fbar))
 
 class ArrayList:
     def __init__(self, shape):

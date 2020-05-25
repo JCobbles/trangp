@@ -8,7 +8,7 @@ import tensorflow_probability as tfp
 from reggae.mcmc import MetropolisHastings, Parameter
 from reggae.models.results import GenericResults, MixedKernelResults
 from reggae.utilities import jitter_cholesky, logit
-
+from reggae.models import GPKernelSelector
 import numpy as np
 
 f64 = np.float64
@@ -147,20 +147,20 @@ class MetropolisKernel(tfp.mcmc.TransitionKernel):
 class FKernel(MetropolisKernel):
     def __init__(self, data,
                  likelihood, 
-                 fbar_prior_params,
-                 kernel_priors, 
+                 kernel_selector: GPKernelSelector, 
                  tf_mrna_present, 
                  state_indices, 
                  step_size):
-        self.fbar_prior_params = fbar_prior_params
-        self.kernel_priors = kernel_priors
+        self.fbar_prior_params = kernel_selector()
+        self.kernel_priors = kernel_selector.priors()
+        self.kernel_selector = kernel_selector
         self.num_tfs = data.f_obs.shape[1]
         self.num_genes = data.m_obs.shape[1]
         self.likelihood = likelihood
         self.tf_mrna_present = True
         self.state_indices = state_indices
         self.num_replicates = data.f_obs.shape[0]
-        super().__init__(step_size, tune_every=20)
+        super().__init__(step_size, tune_every=50)
 
     def _one_step(self, current_state, previous_kernel_results, all_states):
         # Untransformed tf mRNA vectors F (Step 1)
@@ -171,8 +171,8 @@ class FKernel(MetropolisKernel):
         # MH
         m, K = self.fbar_prior_params(current_state[1], current_state[2])
         # Propose new params
-        v = tfd.TruncatedNormal(current_state[1], 0.07, low=0, high=100).sample()
-        l2 = tfd.TruncatedNormal(current_state[2], 0.07, low=0, high=100).sample()
+        v = self.kernel_selector.proposal(0, current_state[1]).sample()
+        l2 = self.kernel_selector.proposal(1, current_state[2]).sample()
         m_, K_ = self.fbar_prior_params(v, l2)
 
         for r in range(self.num_replicates):
@@ -182,18 +182,18 @@ class FKernel(MetropolisKernel):
             fstar = tf.zeros_like(fbar)
 
             for i in range(self.num_tfs):
-                # Compute (K_i + S)^-1 K_i
-                invKsigmaK = tf.matmul(tf.linalg.inv(K[i]+S), K[i]) 
-                L = jitter_cholesky(K[i]-tf.matmul(K[i], invKsigmaK))
-                # print(invKsigmaK.shape)
-                c_mu = tf.matmul(z_i[i, None], invKsigmaK)
+                # Compute K_i(K_i + S)^-1 
+                Ksuminv = tf.matmul(K[i], tf.linalg.inv(K[i]+S))
+                # Compute chol(K-K(K+S)^-1 K)
+                L = jitter_cholesky(K[i]-tf.matmul(Ksuminv, K[i]))
+                c_mu = tf.linalg.matvec(Ksuminv, z_i[i])
                 # Compute nu = L^-1 (f-mu)
                 invL = tf.linalg.inv(L)
                 nu = tf.linalg.matvec(invL, fbar-c_mu)
 
-                invKsigmaK = tf.matmul(tf.linalg.inv(K_[i]+S), K_[i]) 
-                L = jitter_cholesky(K_[i]-tf.matmul(K_[i], invKsigmaK))
-                c_mu = tf.matmul(z_i[i, None], invKsigmaK)
+                Ksuminv = tf.matmul(K_[i], tf.linalg.inv(K_[i]+S)) 
+                L = jitter_cholesky(K_[i]-tf.matmul(K_[i], Ksuminv))
+                c_mu = tf.linalg.matvec(Ksuminv, z_i[i])
                 fstar_i = tf.linalg.matvec(L, nu) + c_mu
                 mask = np.zeros((self.num_tfs, 1), dtype='float64')
                 mask[i] = 1
@@ -203,8 +203,10 @@ class FKernel(MetropolisKernel):
             mask[r] = 1
             test_state = (1-mask) * new_state + mask * fstar
 
-            new_prob = self.calculate_probability(test_state, [v, l2], all_states)
-            old_prob = self.calculate_probability(new_state, [current_state[1], current_state[2]], all_states)
+            new_hyp = [v, l2]
+            old_hyp = [current_state[1], current_state[2]]
+            new_prob = self.calculate_probability(test_state, new_hyp, old_hyp, all_states)
+            old_prob = self.calculate_probability(new_state, old_hyp, new_hyp, all_states)
             #previous_kernel_results.target_log_prob #tf.reduce_sum(old_m_likelihood) + old_f_likelihood
 
             is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
@@ -219,7 +221,7 @@ class FKernel(MetropolisKernel):
 
         return [new_state, *new_params], prob, is_accepted[0]
     
-    def calculate_probability(self, fstar, kernel_params, all_states):
+    def calculate_probability(self, fstar, new_hyp, old_hyp, all_states):
         new_m_likelihood = self.likelihood.genes(
             all_states,
             self.state_indices,
@@ -231,14 +233,19 @@ class FKernel(MetropolisKernel):
                                        fstar
                                    )), lambda:f64(0))
         new_prob = tf.reduce_sum(new_m_likelihood) + new_f_likelihood
-        # new_prob += tf.reduce_sum(
-        #     self.kernel_priors[0].log_prob(kernel_params[0]) + \
-        #     self.kernel_priors[1].log_prob(kernel_params[1])
-        # )
+        new_prob += tf.reduce_sum(
+            self.kernel_priors[0].log_prob(new_hyp[0]) + \
+            self.kernel_priors[1].log_prob(new_hyp[1])
+        )
+        new_prob += tf.reduce_sum(
+            self.kernel_selector.proposal(0, new_hyp[0]).log_prob(old_hyp[0]) + \
+            self.kernel_selector.proposal(1, new_hyp[1]).log_prob(old_hyp[1])
+        )
+
         return new_prob
 
     def bootstrap_results(self, init_state, all_states):
-        prob = self.calculate_probability(init_state[0], [init_state[1], init_state[2]], all_states)
+        prob = self.calculate_probability(init_state[0], [init_state[1], init_state[2]], [init_state[1], init_state[2]], all_states)
 
         return GenericResults(prob, True)
     

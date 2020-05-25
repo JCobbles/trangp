@@ -27,11 +27,16 @@ class GPKernelSelector():
             'mlp': [(f64(1), f64(10)), (f64(3.5), f64(20))],
         }
         self._priors = {
-            'rbf': [tfd.Uniform(f64(3.5), f64(10)), tfd.InverseGamma(f64(0.01), f64(0.01))],
+            'rbf': [tfd.Uniform(f64(2), f64(5)), tfd.InverseGamma(f64(0.01), f64(0.01))],
             'mlp': [tfd.Uniform(f64(3.5), f64(10)), tfd.InverseGamma(f64(0.01), f64(0.01))],
+        }
+        self._proposals = {
+            'rbf': [lambda v: tfd.TruncatedNormal(v, 0.05, low=0, high=100), 
+                    lambda l2: tfd.TruncatedNormal(l2, 0.05, low=0, high=100)],
         }
 
     def __call__(self):
+        '''Calculates kernel covariance matrix'''
         if self.kernel == 'rbf':
             return self.rbf
         elif self.kernel == 'mlp':
@@ -41,16 +46,21 @@ class GPKernelSelector():
 
     def initial_params(self):
         if self.kernel == 'rbf':
-            return [100*tf.ones(self.num_tfs, dtype='float64'), 
+            return [2*tf.ones(self.num_tfs, dtype='float64'), 
                     4*tf.ones(self.num_tfs, dtype='float64')]
         elif self.kernel == 'mlp':
             return [0.8*tf.ones(self.num_tfs, dtype='float64'), 
                     0.98*tf.ones(self.num_tfs, dtype='float64')]
+
     def ranges(self):
         return self._ranges[self.kernel]
 
     def priors(self):
         return self._priors[self.kernel]
+
+    def proposal(self, hyp_index, current_val):
+        '''Returns kernel hyperparameter proposal dist centred on current val'''
+        return self._proposals[self.kernel][hyp_index](current_val)
 
     def rbf(self, v, l2):
         sq_dist = tf.divide(tfm.square(self.t_dist), tf.reshape(2*l2, (-1, 1, 1)))
