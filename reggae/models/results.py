@@ -2,6 +2,7 @@ import collections
 from numpy import float64 as f64
 from dataclasses import dataclass
 from reggae.utilities import inverse_positivity, logit
+import numpy as np
 
 GenericResults = collections.namedtuple('GenericResults', [
     'target_log_prob',
@@ -22,15 +23,16 @@ class SampleResults:
     fbar: object
     kbar: object
     k_fbar: object
-    σ2_m: object
+    Δ: object
     kernel_params: object
     wbar: object
     w_0bar: object
-    σ2_f: int = None
+    σ2_m: object
+    σ2_f: object = None
 
     @property
     def f(self):
-        return inverse_positivity(self.fbar)
+        return inverse_positivity(self.fbar).numpy()
     @property
     def k(self):
         return logit(self.kbar).numpy()
@@ -40,3 +42,15 @@ class SampleResults:
     @property
     def weights(self):
         return [logit(self.wbar), logit(self.w_0bar)]
+
+@dataclass
+class SampleResultsMH(SampleResults):
+    @property
+    def k(self):
+        return np.exp(self.kbar)
+    @property
+    def k_f(self):
+        return np.exp(self.k_fbar)
+    @property
+    def weights(self):
+        return [self.wbar, self.w_0bar]

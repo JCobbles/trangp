@@ -8,7 +8,7 @@ from reggae.data_loaders import DataHolder
 from reggae.utilities import exp, mult, jitter_cholesky
 from reggae.models.results import GenericResults
 from reggae.mcmc.kernels import FKernel, KbarKernel
-
+from reggae.models.gp_kernels import GPKernelSelector
 import numpy as np
 from scipy.special import expit
 
@@ -132,7 +132,8 @@ class TranscriptionMCMC(MetropolisHastings):
 
         self.num_tfs = data.f_obs.shape[0] # Number of TFs
         self.num_genes = data.m_obs.shape[0]
-
+        
+        self.kernel_selector = GPKernelSelector(data, options)
         self.likelihood = TranscriptionLikelihood(data, options)
         self.options = options
         # Adaptable variances
@@ -153,7 +154,7 @@ class TranscriptionMCMC(MetropolisHastings):
         V.proposal_dist=lambda v: tfd.TruncatedNormal(v, V.step_size, low=0, high=100) #v_i Fix to 1 if translation model is not used (pg.8)
         L = Parameter('L', tfd.Uniform(f64(min_dist**2-0.5), f64(data.t[-1]**2)), f64(4), step_size=0.05) # TODO auto set
         L.proposal_dist=lambda l2: tfd.TruncatedNormal(l2, L.step_size, low=0, high=100) #l2_i
-        self.t_dist = get_rbf_dist(data.τ, self.N_p)
+
 
         # Translation kinetic parameters
         δbar = Parameter('δbar', tfd.Normal(a, b2), f64(-0.3), step_size=0.3)
@@ -193,7 +194,9 @@ class TranscriptionMCMC(MetropolisHastings):
     def fbar_prior_params(self, v, l2):
     #     print('vl2', v, l2)
         jitter = tf.linalg.diag(1e-5 * np.ones(self.N_p))
-        K = mult(v, exp(-np.square(self.t_dist)/(2*l2))) + jitter
+        K = self.kernel_selector()(v, l2)[1].numpy()[0]+jitter
+
+        # K = mult(v, exp(-np.square(self.t_dist)/(2*l2))) + jitter
         m = np.zeros(self.N_p)
         return m, K
 

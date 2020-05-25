@@ -54,7 +54,7 @@ def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, true_k_f=None
     hpds = np.array(hpds)
     hpds = abs(hpds - np.expand_dims(k_latest, 2))
     ylims = [(0, 1.5), (0, 3.5)]
-    for k in range(2):
+    for k in range(k_f.shape[2]):
         plt.subplot(plotnum)
         plotnum+=1
         plt.bar(np.arange(num_tfs)-0.1, k_latest[:, k], width=0.2, tick_label=labels, label='Model')
@@ -90,7 +90,7 @@ def plot_kinetics_convergence(k, k_f):
     for i in range(num_tfs):
         ax = plt.subplot(num_tfs*100 + horizontal_subplots + i)
         ax.set_title(f'TF {i}')
-        for k in range(2):
+        for k in range(k_f.shape[2]):
             plt.plot(k_f[:, i, k], label=labels[k])
         plt.legend()
 
