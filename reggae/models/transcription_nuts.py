@@ -18,6 +18,7 @@ import numpy as np
 from scipy.special import expit
 
 f64 = np.float64
+PI = tf.constant(np.pi, dtype='float64')
 
 class TranscriptionLikelihood():
     def __init__(self, data: DataHolder, options: Options):
@@ -28,38 +29,34 @@ class TranscriptionLikelihood():
         self.num_tfs = data.f_obs.shape[1]
         self.num_replicates = data.f_obs.shape[0]
 
-    def calculate_protein(self, fbar, k_fbar, Δ=None): # Calculate p_i vector
+    @tf.function
+    def calculate_protein(self, fbar, k_fbar, Δ): # Calculate p_i vector
         τ = self.data.τ
         f_i = inverse_positivity(fbar)
-        a_i, δ_i = (tf.reshape(logit(k_fbar[:, i]), (-1, 1)) for i in range(2))
+        δ_i = tf.reshape(logit(k_fbar), (-1, 1))
         if self.options.delays:
             # Add delay 
             Δ = tf.cast(Δ, 'int32')
 
-            for r in range(self.num_replicates):
-                f_ir = rotate(f_i[r], -Δ)
-                mask = ~tf.sequence_mask(Δ, f_i.shape[2])
-                f_ir = tf.where(mask, f_ir, 0)
-                mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
-                mask[r] = 1
-                f_i = (1-mask) * f_i + mask * f_ir
+            # for r in range(self.num_replicates):
+            #     f_ir = rotate(f_i[r], -Δ)
+            #     mask = ~tf.sequence_mask(Δ, f_i.shape[2])
+            #     f_ir = tf.where(mask, f_ir, 0)
+            #     mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
+            #     mask[r] = 1
+            #     f_i = (1-mask) * f_i + mask * f_ir
 
-        p_i = tf.zeros_like(f_i)
-        for r in range(self.num_replicates):
-            # Approximate integral (trapezoid rule)
-            resolution = τ[1]-τ[0]
-            sum_term = tfm.multiply(tfm.exp(δ_i*τ), f_i[r])
-            integrals = tf.concat([tf.zeros((self.num_tfs, 1), dtype='float64'), 
-                                   0.5*resolution*tfm.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) 
-            exp_δt = tfm.exp(-δ_i*τ)
-            mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
-            mask[r] = 1
-            p_ir = a_i * exp_δt + exp_δt * integrals
-            p_i = (1-mask)*p_i + mask * p_ir
+        # Approximate integral (trapezoid rule)
+        resolution = τ[1]-τ[0]
+        sum_term = tfm.multiply(tfm.exp(δ_i*τ), f_i)
+        cumsum = 0.5*resolution*tfm.cumsum(sum_term[:, :, :-1] + sum_term[:, :, 1:], axis=2)
+        integrals = tf.concat([tf.zeros((self.num_replicates, self.num_tfs, 1), dtype='float64'), cumsum], axis=2) 
+        exp_δt = tfm.exp(-δ_i*τ)
+        p_i = exp_δt * integrals
         return p_i
 
     @tf.function
-    def predict_m(self, kbar, k_fbar, wbar, fbar, w_0bar, Δ=None):
+    def predict_m(self, kbar, k_fbar, wbar, fbar, w_0bar, Δ):
         # Take relevant parameters out of log-space
         a_j, b_j, d_j, s_j = (tf.reshape(logit(kbar[:, i]), (-1, 1)) for i in range(4))
         w = logit(wbar)
@@ -70,22 +67,16 @@ class TranscriptionLikelihood():
         p_i = self.calculate_protein(fbar, k_fbar, Δ)
 
         # Calculate m_pred
-        m_pred = tf.zeros((self.num_replicates, self.num_genes, N_p), dtype='float64')
-        for r in range(self.num_replicates):
-            resolution = τ[1]-τ[0]
-            integrals = tf.zeros((self.num_genes, N_p))
-            interactions =  tf.matmul(w, tfm.log(p_i[r]+1e-100)) + w_0[:, None]
-            G = tfm.sigmoid(interactions) # TF Activation Function (sigmoid)
-            sum_term = G * tfm.exp(d_j*τ)
-            integrals = tf.concat([tf.zeros((self.num_genes, 1), dtype='float64'), # Trapezoid rule
-                                0.5*resolution*tfm.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) 
-            exp_dt = tfm.exp(-d_j*τ)
-            integrals = tfm.multiply(exp_dt, integrals)
+        resolution = τ[1]-τ[0]
+        interactions =  tf.matmul(w, tfm.log(p_i+1e-100)) + w_0[:, None]
+        G = tfm.sigmoid(interactions) # TF Activation Function (sigmoid)
+        sum_term = G * tfm.exp(d_j*τ)
+        integrals = tf.concat([tf.zeros((self.num_replicates, self.num_genes, 1), dtype='float64'), # Trapezoid rule
+                            0.5*resolution*tfm.cumsum(sum_term[:, :, :-1] + sum_term[:, :, 1:], axis=2)], axis=2) 
+        exp_dt = tfm.exp(-d_j*τ)
+        integrals = tfm.multiply(exp_dt, integrals)
 
-            mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
-            mask[r] = 1
-            m_pred_r = b_j/d_j + tfm.multiply((a_j-b_j/d_j), exp_dt) + s_j*integrals
-            m_pred = (1-mask)*m_pred + mask * m_pred_r
+        m_pred = b_j/d_j + tfm.multiply((a_j-b_j/d_j), exp_dt) + s_j*integrals
 
         return m_pred
 
@@ -100,11 +91,12 @@ class TranscriptionLikelihood():
         w = all_states[state_indices['weights']][0] if w is None else w
         w_0 = all_states[state_indices['weights']][1] if w_0 is None else w_0
         σ2_m = all_states[state_indices['σ2_m']] if σ2_m is None else σ2_m
-        Δ = None
+        Δ = tf.zeros((self.num_tfs,), dtype='float64')
         if self.options.delays:
             Δ = all_states[state_indices['Δ']] if Δ is None else Δ
         return fbar, k_fbar, kbar, w, w_0, σ2_m, Δ
 
+    @tf.function#(experimental_compile=True)
     def genes(self, all_states=None, state_indices=None,
               k_fbar=None,
               kbar=None, 
@@ -112,23 +104,15 @@ class TranscriptionLikelihood():
               w=None,
               w_0=None,
               σ2_m=None, 
-              Δ=None, return_sq_diff=False):
+              Δ=None):
         '''
         Computes likelihood of the genes.
         If any of the optional args are None, they are replaced by their 
         current value in all_states.
         '''
-        fbar, k_fbar, kbar, w, w_0, σ2_m, Δ = self.get_parameters_from_state(
+        fbar, k_fbar, kbar, wbar, w_0bar, σ2_m, Δ = self.get_parameters_from_state(
             all_states, state_indices, fbar, k_fbar, kbar, w, w_0, σ2_m, Δ)
 
-        lik, sq_diff = self._genes(fbar, k_fbar, kbar, w, w_0, σ2_m, Δ)
-
-        if return_sq_diff:
-            return lik, sq_diff
-        return lik
-
-    @tf.function
-    def _genes(self, fbar, k_fbar, kbar, wbar, w_0bar, σ2_m, Δ=None):
         m_pred = self.predict_m(kbar, k_fbar, wbar, fbar, w_0bar, Δ)
         sq_diff = tfm.square(self.data.m_obs - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
         sq_diff = tf.reduce_sum(sq_diff, axis=0)
@@ -137,15 +121,17 @@ class TranscriptionLikelihood():
             variance = logit(variance) + self.data.σ2_m_pre # add PUMA variance
         # print(variance.shape, sq_diff.shape)
         # tf.print(variance)
-        log_lik = -0.5*tfm.log(2*np.pi*(variance)) - 0.5*sq_diff/variance
+        log_lik = -0.5*tfm.log(2*PI*(variance)) - 0.5*sq_diff/variance
         log_lik = tf.reduce_sum(log_lik, axis=1)
-        return log_lik, sq_diff
 
-    def tfs(self, σ2_f, fbar, return_sq_diff=False): 
+        return log_lik
+
+    @tf.function#(experimental_compile=True)
+    def tfs(self, σ2_f, fbar): 
         '''
         Computes log-likelihood of the transcription factors.
         '''
-        assert self.options.tf_mrna_present
+        # assert self.options.tf_mrna_present
         if not self.preprocessing_variance:
             variance = tf.reshape(σ2_f, (-1, 1))
         else:
@@ -153,10 +139,9 @@ class TranscriptionLikelihood():
         f_pred = inverse_positivity(fbar)
         sq_diff = tfm.square(self.data.f_obs - tf.transpose(tf.gather(tf.transpose(f_pred),self.data.common_indices)))
         sq_diff = tf.reduce_sum(sq_diff, axis=0)
-        log_lik = -0.5*tfm.log(2*np.pi*variance) - 0.5*sq_diff/variance
+        log_lik = -0.5*tfm.log(2*PI*variance) - 0.5*sq_diff/variance
         log_lik = tf.reduce_sum(log_lik, axis=1)
-        if return_sq_diff:
-            return log_lik, sq_diff
+
         return log_lik
 
 
@@ -248,17 +233,13 @@ class TranscriptionMixedSampler():
                     # tf.print('prob', tf.reduce_sum(new_prob))
                     return tf.reduce_sum(new_prob)                
                 return σ2_m_log_prob_fn
-            σ2_m = KernelParameter('σ2_m', LogisticNormal(f64(1e-5), f64(1e-4)), # f64(max(np.var(data.f_obs, axis=1)))
+            σ2_m = KernelParameter('σ2_m', LogisticNormal(f64(1e-5), f64(1e-2)), # f64(max(np.var(data.f_obs, axis=1)))
                             logistic(f64(5e-3))*tf.ones(self.num_genes, dtype='float64'), 
                             hmc_log_prob=σ2_m_log_prob, requires_all_states=True, step_size=logistic_step_size)
 
         # Kinetic parameters
-        kbar_initial = 0.6*np.float64(np.c_[ # was -0.1
-            np.ones(self.num_genes), # a_j
-            np.ones(self.num_genes), # b_j
-            np.ones(self.num_genes), # d_j
-            np.ones(self.num_genes)  # s_j
-        ])
+        kbar_initial = 0.6*tf.ones((self.num_genes, 4), dtype='float64')
+
         def kbar_log_prob(all_states):
             def kbar_log_prob_fn(kbar, k_fbar):
                 k_m = logit(kbar)

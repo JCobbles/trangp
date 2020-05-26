@@ -179,25 +179,20 @@ class FKernel(MetropolisKernel):
             # Gibbs step
             fbar = new_state[r]
             z_i = tfd.MultivariateNormalDiag(fbar, self.step_size).sample()
-            fstar = tf.zeros_like(fbar)
 
-            for i in range(self.num_tfs):
-                # Compute K_i(K_i + S)^-1 
-                Ksuminv = tf.matmul(K[i], tf.linalg.inv(K[i]+S))
-                # Compute chol(K-K(K+S)^-1 K)
-                L = jitter_cholesky(K[i]-tf.matmul(Ksuminv, K[i]))
-                c_mu = tf.linalg.matvec(Ksuminv, z_i[i])
-                # Compute nu = L^-1 (f-mu)
-                invL = tf.linalg.inv(L)
-                nu = tf.linalg.matvec(invL, fbar-c_mu)
+            # Compute K_i(K_i + S)^-1 
+            Ksuminv = tf.matmul(K, tf.linalg.inv(K+S))
+            # Compute chol(K-K(K+S)^-1 K)
+            L = jitter_cholesky(K-tf.matmul(Ksuminv, K))
+            c_mu = tf.linalg.matvec(Ksuminv, z_i)
+            # Compute nu = L^-1 (f-mu)
+            invL = tf.linalg.inv(L)
+            nu = tf.linalg.matvec(invL, fbar-c_mu)
 
-                Ksuminv = tf.matmul(K_[i], tf.linalg.inv(K_[i]+S)) 
-                L = jitter_cholesky(K_[i]-tf.matmul(K_[i], Ksuminv))
-                c_mu = tf.linalg.matvec(Ksuminv, z_i[i])
-                fstar_i = tf.linalg.matvec(L, nu) + c_mu
-                mask = np.zeros((self.num_tfs, 1), dtype='float64')
-                mask[i] = 1
-                fstar = (1-mask) * fstar + mask * fstar_i
+            Ksuminv = tf.matmul(K_, tf.linalg.inv(K_+S)) 
+            L = jitter_cholesky(K_-tf.matmul(K_, Ksuminv))
+            c_mu = tf.linalg.matvec(Ksuminv, z_i)
+            fstar = tf.linalg.matvec(L, nu) + c_mu
 
             mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
             mask[r] = 1
