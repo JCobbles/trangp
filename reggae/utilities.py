@@ -55,10 +55,10 @@ def mult(a, b):
 
 def jitter_cholesky(A):
     try:
-        jitter1 = linalg.diag(1e-7 * np.ones(A.shape[0]))
+        jitter1 = linalg.diag(1e-7 * tf.ones(A.shape[-1], dtype='float64'))
         return linalg.cholesky(A + jitter1)
     except:
-        jitter2 = linalg.diag(1e-5 * np.ones(A.shape[0]))
+        jitter2 = linalg.diag(1e-5 * tf.ones(A.shape[-1], dtype='float64'))
         return linalg.cholesky(A + jitter2)
 
 def inverse_positivity(fbar):

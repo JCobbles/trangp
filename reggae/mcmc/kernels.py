@@ -222,9 +222,13 @@ class FKernel(MetropolisKernel):
             self.state_indices,
             fbar=fstar,
         )
+        σ2_f = 1e-6*tf.ones(self.num_tfs, dtype='float64')
+        if 'σ2_f' in self.state_indices:
+            σ2_f = all_states[self.state_indices['σ2_f']]
+
         new_f_likelihood = tf.cond(tf.equal(self.tf_mrna_present, tf.constant(True)), 
                                    lambda:tf.reduce_sum(self.likelihood.tfs(
-                                       1e-6*tf.ones(self.num_tfs, dtype='float64'), # TODO
+                                       σ2_f,
                                        fstar
                                    )), lambda:f64(0))
         new_prob = tf.reduce_sum(new_m_likelihood) + new_f_likelihood

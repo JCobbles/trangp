@@ -53,7 +53,7 @@ def plot_kinetics(labels, k, k_f, plot_barenco=False, true_k=None, true_k_f=None
         hpds.append(arviz.hpd(k_f[-num_hpd:, i,:], credible_interval=0.95))
     hpds = np.array(hpds)
     hpds = abs(hpds - np.expand_dims(k_latest, 2))
-    ylims = [(0, 1.5), (0, 3.5)]
+    ylims = [(0, 2.5), (0, 3.5)]
     for k in range(k_f.shape[2]):
         plt.subplot(plotnum)
         plotnum+=1
@@ -101,7 +101,6 @@ def plot_genes(data, m_preds, titles, num_hpd=20, replicate=0):
     plt.figure(figsize=(14, 17))
     plt.suptitle('Genes')
     num_genes = m_preds[0].shape[0]
-    N_p = m_preds[0].shape[1]
     for j in range(num_genes):
         ax = plt.subplot(531+j)
         plt.title(titles[j])
