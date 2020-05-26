@@ -24,19 +24,30 @@ class TranscriptionLikelihood():
     def __init__(self, data: DataHolder, options: Options):
         self.options = options
         self.data = data
+        self.num_tfs = data.f_obs.shape[1]
         self.preprocessing_variance = options.preprocessing_variance
-        self.num_genes = data.m_obs.shape[0]
+        self.num_genes = data.m_obs.shape[1]
+        self.num_replicates = data.m_obs.shape[0]
 
     def calculate_protein(self, fbar, δbar): # Calculate p_i vector
         τ = self.data.τ
         N_p = self.data.τ.shape[0]
         f_i = np.log(1+np.exp(fbar))
-        δ = np.exp(δbar)
-        p_i = np.zeros(N_p) # TODO it seems the ODE translation model has params A, S see gpmtfComputeTFODE
-        Δ = τ[1]-τ[0]
-        sum_term = mult(exp(δ*τ), f_i)
-        p_i[1:] = 0.5*Δ*np.cumsum(sum_term[:-1] + sum_term[1:]) # Trapezoid rule
-        p_i = mult(exp(-δ*τ), p_i)
+        δ_i = np.exp(δbar)
+
+        p_i = np.zeros_like(f_i)
+        for r in range(self.num_replicates):
+            # Approximate integral (trapezoid rule)
+            resolution = τ[1]-τ[0]
+            sum_term = mult(exp(δ_i*τ), f_i[r])
+            integrals = tf.concat([np.zeros((self.num_tfs, 1), dtype='float64'), 
+                                   0.5*resolution*np.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) 
+            exp_δt = exp(-δ_i*τ)
+            mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
+            mask[r] = 1
+            p_ir = exp_δt * integrals
+            p_i = (1-mask)*p_i + mask * p_ir
+
         return p_i
 
     def predict_m(self, kbar, δbar, w, fbar, w_0):
@@ -44,21 +55,27 @@ class TranscriptionLikelihood():
         a_j, b_j, d_j, s_j = (np.exp(kbar[:, i]).reshape(-1, 1) for i in range(4))
         τ = self.data.τ
         N_p = self.data.τ.shape[0]
-        Δ = τ[1]-τ[0]
 
         # Calculate p_i vector
         p_i = self.calculate_protein(fbar, δbar)
 
         # Calculate m_pred
-        integrals = np.zeros((self.num_genes, N_p))
-        interactions = w[:, 0][:, None]*np.log(p_i+1e-100) + w_0[:, None]
-        G = expit(interactions) # TF Activation Function (sigmoid)
-        sum_term = G * exp(d_j*τ)
-        integrals[:, 1:] = 0.5*Δ*np.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1) # Trapezoid rule
-        exp_dt = exp(-d_j*τ)
-        integrals = mult(exp_dt, integrals)
-        m_pred = b_j/d_j + mult((a_j-b_j/d_j), exp_dt) + s_j*integrals
+        m_pred = np.zeros((self.num_replicates, self.num_genes, N_p), dtype='float64')
+        for r in range(self.num_replicates):
+            resolution = τ[1]-τ[0]
+            integrals = np.zeros((self.num_genes, N_p))
+            interactions = w[:, 0][:, None]*np.log(p_i[r]+1e-100) + w_0[:, None]# tf.matmul(w, tfm.log(p_i[r]+1e-100)) + w_0[:, None]
+            G = expit(interactions) # TF Activation Function (sigmoid)
+            sum_term = G * exp(d_j*τ)
+            integrals = tf.concat([np.zeros((self.num_genes, 1), dtype='float64'), # Trapezoid rule
+                                0.5*resolution*np.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) 
+            exp_dt = exp(-d_j*τ)
+            integrals = mult(exp_dt, integrals)
 
+            mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
+            mask[r] = 1
+            m_pred_r = b_j/d_j + mult((a_j-b_j/d_j), exp_dt) + s_j*integrals
+            m_pred = (1-mask)*m_pred + mask * m_pred_r
         return m_pred
 
     def genes(self, params, δbar=None,
@@ -84,7 +101,8 @@ class TranscriptionLikelihood():
         m_pred = self.predict_m(kbar, δbar, w, fbar, w_0)
 
         log_lik = np.zeros(self.num_genes)
-        sq_diff = np.square(self.data.m_obs - m_pred[:, self.data.common_indices])
+        sq_diff = np.square(self.data.m_obs - m_pred[:, :, self.data.common_indices])
+        sq_diff = np.sum(sq_diff, axis=0)
         variance = σ2_m.reshape(-1, 1)
         if self.preprocessing_variance:
             variance = variance + self.data.σ2_m_pre # add PUMA variance
@@ -108,8 +126,8 @@ class TranscriptionLikelihood():
             variance = self.data.σ2_f_pre
         f_pred = np.log(1+np.exp(fbar))
         f_pred = np.atleast_2d(f_pred)
-        sq_diff = np.square(self.data.f_obs - f_pred[:, self.data.common_indices])
-
+        sq_diff = np.square(self.data.f_obs - f_pred[:, :, self.data.common_indices])
+        sq_diff = np.sum(sq_diff, axis=0)
         log_lik = -0.5*np.log(2*np.pi*variance) - 0.5*sq_diff/variance
         log_lik = np.sum(log_lik, axis=1)
         if return_sq_diff:
@@ -129,9 +147,9 @@ class TranscriptionMCMC(MetropolisHastings):
         min_dist = min(data.t[1:]-data.t[:-1])
         self.N_p = data.τ.shape[0]
         self.N_m = data.t.shape[0]      # Number of observations
-
-        self.num_tfs = data.f_obs.shape[0] # Number of TFs
-        self.num_genes = data.m_obs.shape[0]
+        self.num_replicates = data.f_obs.shape[0]
+        self.num_tfs = data.f_obs.shape[1]
+        self.num_genes = data.m_obs.shape[1]
         
         self.kernel_selector = GPKernelSelector(data, options)
         self.likelihood = TranscriptionLikelihood(data, options)
@@ -147,7 +165,7 @@ class TranscriptionMCMC(MetropolisHastings):
         w = Parameter('w', tfd.Normal(0, 2), 1*np.ones((self.num_genes, self.num_tfs)), step_size=0.5*tf.ones(self.num_genes, dtype='float64'))
         w.proposal_dist=lambda mu, j:tfd.Normal(mu, w.step_size[j]) #) w_j) # At the moment this is the same as w_j0 (see pg.8)
         # Latent function
-        fbar = Parameter('fbar', self.fbar_prior, 0.5*np.ones(self.N_p))
+        fbar = Parameter('fbar', self.fbar_prior, 0.5*np.ones((self.num_replicates, self.num_tfs, self.N_p)))
 
         # GP hyperparameters
         V = Parameter('V', tfd.InverseGamma(f64(0.01), f64(0.01)), f64(1), step_size=0.05, fixed=not options.tf_mrna_present)
@@ -202,15 +220,10 @@ class TranscriptionMCMC(MetropolisHastings):
 
     def fbar_prior(self, fbar, v, l2):
         m, K = self.fbar_prior_params(v, l2)
-    
-        try:
-            return tfd.MultivariateNormalFullCovariance(m, K).log_prob(fbar)
-        except:
-            jitter = tf.linalg.diag(1e-4 * np.ones(self.N_p))
-            try:
-                return np.float64(tfd.MultivariateNormalFullCovariance(m, K+jitter).log_prob(fbar))
-            except:
-                return -np.inf
+        prob = 0
+        for r in range(self.num_replicates):
+            prob += tfd.MultivariateNormalTriL(loc=m, scale_tril=tf.linalg.cholesky(K)).log_prob(fbar[r, 0])
+        return prob
 
     def iterate(self):
         params = self.params
@@ -222,27 +235,32 @@ class TranscriptionMCMC(MetropolisHastings):
         
         # Untransformed tf mRNA vectors F (Step 1)
         fbar = params.fbar.value
-        for i in range(self.num_tfs):
-            # Gibbs step
-            z_i = tf.reshape(tfd.MultivariateNormalDiag(fbar, self.h_f).sample(), (1, -1))
-            # MH
-            m, K = self.fbar_prior_params(params.V.value, params.L.value)
-            invKsigmaK = tf.matmul(tf.linalg.inv(K+tf.linalg.diag(self.h_f)), K) # (C_i + hI)C_i
-            L = jitter_cholesky(K-tf.matmul(K, invKsigmaK))
-            c_mu = tf.matmul(z_i, invKsigmaK)
-            fstar = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
-            fstar = tf.reshape(fstar, (-1, ))
-            new_m_likelihood = self.likelihood.genes(params, fbar=fstar)
-            new_f_likelihood = 0 
-            if self.options.tf_mrna_present:
-                new_f_likelihood = self.likelihood.tfs(params, fstar)
-            new_prob = np.sum(new_m_likelihood) + new_f_likelihood
-            old_prob = np.sum(old_m_likelihood) + old_f_likelihood
-            if self.is_accepted(new_prob, old_prob):
-                params.fbar.value = fstar
-                old_m_likelihood = new_m_likelihood
-                old_f_likelihood = new_f_likelihood
-                self.acceptance_rates['fbar'] += 1/self.num_tfs
+        # Gibbs step
+        z_i = tfd.MultivariateNormalDiag(fbar, self.h_f).sample()
+        # MH
+        m, K = self.fbar_prior_params(params.V.value, params.L.value)
+        for r in range(self.num_replicates):
+
+            for i in range(self.num_tfs): # TODO does not really work for multiple TFs
+                invKsigmaK = tf.matmul(tf.linalg.inv(K+tf.linalg.diag(self.h_f)), K) # (C_i + hI)C_i
+                L = jitter_cholesky(K-tf.matmul(K, invKsigmaK))
+                c_mu = tf.linalg.matvec(invKsigmaK, z_i[r][i])
+                fstar_i = tf.matmul(tf.random.normal((1, L.shape[0]), dtype='float64'), L) + c_mu
+                # fstar_i = tf.reshape(fstar, (-1, ))
+                mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
+                mask[r] = 1
+                fstar = (1-mask) * fbar + mask * fstar_i
+                new_m_likelihood = self.likelihood.genes(params, fbar=fstar)
+                new_f_likelihood = 0 
+                if self.options.tf_mrna_present:
+                    new_f_likelihood = self.likelihood.tfs(params, fstar)
+                new_prob = np.sum(new_m_likelihood) + np.sum(new_f_likelihood)
+                old_prob = np.sum(old_m_likelihood) + np.sum(old_f_likelihood)
+                if self.is_accepted(new_prob, old_prob):
+                    params.fbar.value[r] = fstar_i
+                    old_m_likelihood = new_m_likelihood
+                    old_f_likelihood = new_f_likelihood
+                    self.acceptance_rates['fbar'] += 1/(self.num_tfs*self.num_replicates)
 
 
         if self.options.tf_mrna_present: # (Step 2)
