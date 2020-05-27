@@ -309,7 +309,7 @@ class TranscriptionMixedSampler():
         send_all_states = [param.requires_all_states for param in self.active_params]
 
         current_state = [param.value for param in self.active_params]
-        mixed_kern = MixedKernel(kernels, send_all_states)
+        mixed_kern = MixedKernel(kernels, send_all_states, T)
         
         def trace_fn(a, previous_kernel_results):
             return previous_kernel_results.is_accepted

@@ -16,20 +16,25 @@ f64 = np.float64
 from inspect import signature
 
 class MixedKernel(tfp.mcmc.TransitionKernel):
-    def __init__(self, kernels, send_all_states):
+    def __init__(self, kernels, send_all_states, T):
         '''
         send_all_states is a boolean array of size |kernels| indicating which components of the state
         have kernels whose log probability depends on the state of others, in which case MixedKernel
         will recompute the previous target_log_prob before handing it over in the `one_step` call.
         '''
+        self.T = T
         self.kernels = kernels
         self.send_all_states = send_all_states
         self.num_kernels = len(kernels)
+        self.last_m_log_lik = tf.Variable(tf.zeros((self.num_kernels)))
         self.one_step_receives_state = [len(signature(k.one_step).parameters)>2 for k in kernels]
         super().__init__()
 
     def one_step(self, current_state, previous_kernel_results):
-#         print('running', current_state, previous_kernel_results)
+        # tf.print('running iteration')
+        # if previous_kernel_results.iteration % 10:
+        prog(self.T, previous_kernel_results.iteration)
+        # tf.print('running', current_state)
         new_state = list()
         is_accepted = list()
         inner_results = list()

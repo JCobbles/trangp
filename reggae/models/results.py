@@ -16,6 +16,7 @@ MixedKernelResults = collections.namedtuple('MixedKernelResults', [
 #     'step_size',
 #     'log_accept_ratio',
     'is_accepted',
+    'iteration',
 ])
 
 @dataclass

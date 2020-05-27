@@ -121,3 +121,11 @@ def rotate(matrix, shifts):
 
     # return the resliced tensor
     return tf.gather_nd(matrix, new_ind)
+
+@tf.function
+def prog(T, current):
+    mult = 20
+    pc = current/T
+    x = tf.strings.reduce_join(tf.repeat("=", tf.cast(mult*pc, 'int32')))
+    y = tf.strings.reduce_join(tf.repeat("-", tf.cast(mult*(1-pc), 'int32')))
+    tf.print('Progress: \t ', tf.round(pc *1000.), '%\t ', x, y, '', '\r', sep='\b', end='')
