@@ -10,7 +10,7 @@ from reggae.mcmc import MetropolisHastings
 from reggae.mcmc.parameter import KernelParameter, Parameter, Params
 from reggae.models.results import GenericResults, SampleResults
 from reggae.models import Options, GPKernelSelector
-from reggae.mcmc.kernels import FKernel, MixedKernel, DeltaKernel, GibbsKernel, ESSWrapper
+from reggae.mcmc.kernels import LatentKernel, MixedKernel, DelayKernel, GibbsKernel
 from reggae.data_loaders import DataHolder
 from reggae.utilities import rotate, jitter_cholesky, logit, logistic, LogisticNormal, inverse_positivity
 

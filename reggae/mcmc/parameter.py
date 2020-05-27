@@ -1,8 +1,6 @@
-from reggae.mcmc import nuts
-import reggae.mcmc as rmcmc
 from numpy import float64
 from dataclasses import dataclass
-
+import reggae
 
 @dataclass
 class Params:

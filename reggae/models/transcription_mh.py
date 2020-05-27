@@ -7,7 +7,7 @@ from reggae.mcmc import MetropolisHastings, Parameter
 from reggae.data_loaders import DataHolder
 from reggae.utilities import exp, mult, jitter_cholesky
 from reggae.models.results import GenericResults
-from reggae.mcmc.kernels import FKernel, KbarKernel
+from reggae.mcmc.kernels import LatentKernel
 from reggae.models.gp_kernels import GPKernelSelector
 import numpy as np
 from scipy.special import expit
