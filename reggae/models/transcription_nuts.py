@@ -7,10 +7,10 @@ from tensorflow_probability import bijectors as tfb
 from tensorflow_probability import distributions as tfd
 
 from reggae.mcmc import MetropolisHastings
-from reggae.mcmc.parameter import KernelParameter, Parameter
+from reggae.mcmc.parameter import KernelParameter, Parameter, Params
 from reggae.models.results import GenericResults, SampleResults
 from reggae.models import Options, GPKernelSelector
-from reggae.mcmc.kernels import FKernel, MixedKernel, DeltaKernel, GibbsKernel
+from reggae.mcmc.kernels import FKernel, MixedKernel, DeltaKernel, GibbsKernel, ESSWrapper
 from reggae.data_loaders import DataHolder
 from reggae.utilities import rotate, jitter_cholesky, logit, logistic, LogisticNormal, inverse_positivity
 
@@ -144,13 +144,6 @@ class TranscriptionLikelihood():
 
         return log_lik
 
-
-TupleParams_pre = collections.namedtuple('TupleParams_pre', [
-    'latents','σ2_m','weights', 'Δ', 'kinetics', 'σ2_f',
-])
-TupleParams = collections.namedtuple('TupleParams', [
-    'latents','σ2_m','weights', 'Δ', 'kinetics',
-])
 
 class TranscriptionMixedSampler():
     '''

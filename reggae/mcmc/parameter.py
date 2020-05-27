@@ -1,6 +1,20 @@
 from reggae.mcmc import nuts
-
+import reggae.mcmc as rmcmc
 from numpy import float64
+from dataclasses import dataclass
+
+
+@dataclass
+class Params:
+    latents:       object
+    weights:       object
+    kinetics:      object
+    Δ:             object = None
+    kernel_params: object = None
+    σ2_m:          object = None
+    σ2_f:          object = None
+
+
 class Parameter():
     def __init__(self, 
                  name, 
@@ -43,7 +57,7 @@ class KernelParameter(Parameter):
         self.hmc_log_prob = hmc_log_prob
         self.requires_all_states = requires_all_states
         if hmc_log_prob is not None:
-            self.kernel = nuts.NoUTurnSampler(hmc_log_prob, step_size=step_size)
+            self.kernel = rmcmc.kernels.NUTSWrapperKernel(hmc_log_prob, step_size=step_size)
         if kernel is not None:
             self.kernel = kernel
         super().__init__(name, prior, initial_value, step_size)

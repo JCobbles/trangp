@@ -1,12 +1,9 @@
-class Options():
-    def __init__(self, 
-                 preprocessing_variance=True, 
-                 tf_mrna_present=True, 
-                 delays=False,
-                 kernel='rbf',
-                 initial_step_sizes={}):
-        self.preprocessing_variance = preprocessing_variance
-        self.tf_mrna_present = tf_mrna_present
-        self.delays = delays
-        self.kernel = kernel
-        self.initial_step_sizes = initial_step_sizes
+from dataclasses import dataclass, field
+@dataclass
+class Options:
+    preprocessing_variance: bool = True
+    tf_mrna_present:        bool = True
+    delays:                 bool = False
+    kernel:                 str = 'rbf'
+    latent_sampler:         str = 'joint'
+    initial_step_sizes:     dict = field(default_factory=dict)
