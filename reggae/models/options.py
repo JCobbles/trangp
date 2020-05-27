@@ -5,5 +5,5 @@ class Options:
     tf_mrna_present:        bool = True
     delays:                 bool = False
     kernel:                 str = 'rbf'
-    latent_sampler:         str = 'joint'
+    joint_latent:           bool = True
     initial_step_sizes:     dict = field(default_factory=dict)

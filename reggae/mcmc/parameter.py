@@ -55,7 +55,7 @@ class KernelParameter(Parameter):
         self.hmc_log_prob = hmc_log_prob
         self.requires_all_states = requires_all_states
         if hmc_log_prob is not None:
-            self.kernel = rmcmc.kernels.NUTSWrapperKernel(hmc_log_prob, step_size=step_size)
+            self.kernel = reggae.mcmc.kernels.wrappers.NUTSWrapperKernel(hmc_log_prob, step_size=step_size)
         if kernel is not None:
             self.kernel = kernel
         super().__init__(name, prior, initial_value, step_size)
