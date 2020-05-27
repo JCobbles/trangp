@@ -5,9 +5,9 @@ from tensorflow import math as tfm
 from tensorflow_probability import distributions as tfd
 import tensorflow_probability as tfp
 
-from reggae.mcmc import MetropolisHastings, Parameter
+from reggae.mcmc import MetropolisHastings
 from reggae.models.results import GenericResults, MixedKernelResults
-from reggae.utilities import jitter_cholesky, logit
+from reggae.utilities import jitter_cholesky, logit, prog
 from reggae.models import GPKernelSelector
 import numpy as np
 
@@ -45,9 +45,11 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
                     wrapped_state_i = [wrapped_state_i]
 
                 previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
-                    target_log_prob=self.kernels[i].target_log_prob_fn(current_state)(*wrapped_state_i))
+                    target_log_prob=self.kernels[i].target_log_prob_fn_fn(current_state)(*wrapped_state_i))
 
-            self.kernels[i].all_states_hack = current_state
+
+            # if i == 2:
+            #     tf.print(current_state[2][1][0], previous_kernel_results.inner_results[i].target_log_prob)
 
             args = []
             try:
@@ -148,6 +150,51 @@ class MetropolisKernel(tfp.mcmc.TransitionKernel):
     def is_calibrated(self):
         return True
 
+class ESSWrapper(tfp.experimental.mcmc.EllipticalSliceSampler):
+    def __init__(self, normal_sampler_fn, log_likelihood_fn):
+        self.normal_sampler_fn_fn = normal_sampler_fn
+        self.log_likelihood_fn_fn = log_likelihood_fn
+        # Temporarily set the following
+        self.normal_sampler_fn_called = normal_sampler_fn
+        self.log_likelihood_fn_called = log_likelihood_fn
+        super().__init__(normal_sampler_fn, log_likelihood_fn)
+
+    @property
+    def normal_sampler_fn(self):
+        return self.normal_sampler_fn_called
+    @property
+    def log_likelihood_fn(self):
+        return self.log_likelihood_fn_called
+
+    def one_step(self, current_state, previous_kernel_results, all_states):
+        self.normal_sampler_fn_called = self.normal_sampler_fn_fn(all_states)
+        self.log_likelihood_fn_called = self.log_likelihood_fn_fn(all_states)
+        return super().one_step(current_state, previous_kernel_results)
+
+    def bootstrap_results(self, init_state, all_states):
+        self.normal_sampler_fn_called = self.normal_sampler_fn_fn(all_states)
+        self.log_likelihood_fn_called = self.log_likelihood_fn_fn(all_states)
+
+        return super().bootstrap_results(init_state)
+
+class NUTSWrapperKernel(tfp.mcmc.NoUTurnSampler):
+    def __init__(self, target_log_prob_fn, step_size):
+        self.target_log_prob_fn_fn = target_log_prob_fn
+        # Temporarily set the following
+        self.target_log_prob_fn_called = target_log_prob_fn
+        super().__init__(target_log_prob_fn, step_size)
+
+    @property
+    def target_log_prob_fn(self):
+        return self.target_log_prob_fn_called
+
+    def one_step(self, current_state, previous_kernel_results, all_states):
+        self.target_log_prob_fn_called = self.target_log_prob_fn_fn(all_states)
+        return super().one_step(current_state, previous_kernel_results)
+
+    def bootstrap_results(self, init_state, all_states):
+        self.target_log_prob_fn_called = self.target_log_prob_fn_fn(all_states)
+        return super().bootstrap_results(init_state)
 
 class FKernel(MetropolisKernel):
     def __init__(self, data,
@@ -155,7 +202,8 @@ class FKernel(MetropolisKernel):
                  kernel_selector: GPKernelSelector, 
                  tf_mrna_present, 
                  state_indices, 
-                 step_size):
+                 step_size,
+                 sampling_method='joint'):
         self.fbar_prior_params = kernel_selector()
         self.kernel_priors = kernel_selector.priors()
         self.kernel_selector = kernel_selector
