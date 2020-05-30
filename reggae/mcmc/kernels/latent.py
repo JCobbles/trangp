@@ -1,7 +1,6 @@
 import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
-from reggae.utilities import logit
 from reggae.mcmc.kernels.mh import MetropolisKernel
 from reggae.mcmc.kernels.wrappers import ESSWrapper
 from reggae.models import GPKernelSelector
@@ -13,25 +12,23 @@ f64 = np.float64
 
 
 class LatentKernel(MetropolisKernel):
-    def __init__(self, data,
+    def __init__(self, data, options,
                  likelihood, 
                  kernel_selector: GPKernelSelector, 
-                 tf_mrna_present, 
                  state_indices, 
-                 step_size,
-                 sampling_method='joint'):
+                 step_size):
         self.fbar_prior_params = kernel_selector()
         self.kernel_priors = kernel_selector.priors()
         self.kernel_selector = kernel_selector
         self.num_tfs = data.f_obs.shape[1]
         self.num_genes = data.m_obs.shape[1]
         self.likelihood = likelihood
-        self.tf_mrna_present = True
+        self.tf_mrna_present = options.tf_mrna_present
         self.state_indices = state_indices
         self.num_replicates = data.f_obs.shape[0]
         self.step_fn = self.f_one_step
         self.calc_prob_fn = self.f_calc_prob
-        if sampling_method is 'joint':
+        if options.joint_latent:
             self.step_fn = self.joint_one_step
             self.calc_prob_fn = self.joint_calc_prob
             
@@ -77,10 +74,10 @@ class LatentKernel(MetropolisKernel):
 
             new_state = tf.cond(tf.equal(is_accepted, tf.constant(False)),
                                 lambda:new_state, lambda:test_state)
+        return new_state, prob, is_accepted[0]
 
     def joint_one_step(self, current_state, previous_kernel_results, all_states):
         # Untransformed tf mRNA vectors F (Step 1)
-        old_probs = list()
         new_state = tf.identity(current_state[0])
         new_params = []
         S = tf.linalg.diag(self.step_size)
@@ -91,44 +88,38 @@ class LatentKernel(MetropolisKernel):
         l2 = self.kernel_selector.proposal(1, current_state[2]).sample()
         m_, K_ = self.fbar_prior_params(v, l2)
 
-        for r in range(self.num_replicates):
-            # Gibbs step
-            fbar = new_state[r]
-            z_i = tfd.MultivariateNormalDiag(fbar, self.step_size).sample()
+        # Gibbs step
+        fbar = new_state
+        z_i = tfd.MultivariateNormalDiag(fbar, self.step_size).sample()
 
-            # Compute K_i(K_i + S)^-1 
-            Ksuminv = tf.matmul(K, tf.linalg.inv(K+S))
-            # Compute chol(K-K(K+S)^-1 K)
-            L = jitter_cholesky(K-tf.matmul(Ksuminv, K))
-            c_mu = tf.linalg.matvec(Ksuminv, z_i)
-            # Compute nu = L^-1 (f-mu)
-            invL = tf.linalg.inv(L)
-            nu = tf.linalg.matvec(invL, fbar-c_mu)
+        # Compute K_i(K_i + S)^-1 
+        Ksuminv = tf.matmul(K, tf.linalg.inv(K+S))
+        # Compute chol(K-K(K+S)^-1 K)
+        L = jitter_cholesky(K-tf.matmul(Ksuminv, K))
+        c_mu = tf.linalg.matvec(Ksuminv, z_i)
+        # Compute nu = L^-1 (f-mu)
+        invL = tf.linalg.inv(L)
+        nu = tf.linalg.matvec(invL, fbar-c_mu)
 
-            Ksuminv = tf.matmul(K_, tf.linalg.inv(K_+S)) 
-            L = jitter_cholesky(K_-tf.matmul(K_, Ksuminv))
-            c_mu = tf.linalg.matvec(Ksuminv, z_i)
-            fstar = tf.linalg.matvec(L, nu) + c_mu
+        Ksuminv = tf.matmul(K_, tf.linalg.inv(K_+S)) 
+        L = jitter_cholesky(K_-tf.matmul(K_, Ksuminv))
+        c_mu = tf.linalg.matvec(Ksuminv, z_i)
+        fstar = tf.linalg.matvec(L, nu) + c_mu
 
-            mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
-            mask[r] = 1
-            test_state = (1-mask) * new_state + mask * fstar
+        new_hyp = [v, l2]
+        old_hyp = [current_state[1], current_state[2]]
+        new_prob = self.calc_prob_fn(fstar, new_hyp, old_hyp, all_states)
+        old_prob = self.calc_prob_fn(new_state, old_hyp, new_hyp, all_states) #previous_kernel_results.target_log_prob 
 
-            new_hyp = [v, l2]
-            old_hyp = [current_state[1], current_state[2]]
-            new_prob = self.calc_prob_fn(test_state, new_hyp, old_hyp, all_states)
-            old_prob = self.calc_prob_fn(new_state, old_hyp, new_hyp, all_states)
-            #previous_kernel_results.target_log_prob #tf.reduce_sum(old_m_likelihood) + old_f_likelihood
-
-            is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
-            
-            prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
+        is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
+        
+        prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
 
 
-            new_state = tf.cond(tf.equal(is_accepted, tf.constant(False)),
-                                lambda:new_state, lambda:test_state)
-            new_params = tf.cond(tf.equal(is_accepted, tf.constant(False)),
-                                 lambda:[current_state[1], current_state[2]], lambda:[v, l2])
+        new_state = tf.cond(tf.equal(is_accepted, tf.constant(False)),
+                            lambda:new_state, lambda:fstar)
+        new_params = tf.cond(tf.equal(is_accepted, tf.constant(False)),
+                                lambda:[current_state[1], current_state[2]], lambda:[v, l2])
 
         return [new_state, *new_params], prob, is_accepted[0]
     
@@ -205,7 +196,6 @@ class ESSBuilder:
 
     def f_log_prob_fn(self, all_states):
         def f_log_prob(fstar):
-            tf.print('here', fstar)
             # print(all_states)
             new_m_likelihood = self.likelihood.genes(
                 all_states,
