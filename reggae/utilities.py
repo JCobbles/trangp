@@ -3,6 +3,8 @@ from tensorflow import math as tfm
 import tensorflow as tf
 from tensorflow import linalg
 from tensorflow_probability import distributions as tfd
+from datetime import datetime
+import pickle
 
 f64 = np.float64
 
@@ -86,7 +88,7 @@ class ArrayList:
         return data
 
 class LogisticNormal():
-    def __init__(self, a, b, loc=f64(0), scale=f64(1.78), allow_nan_stats=True):
+    def __init__(self, a, b, loc=f64(0), scale=f64(1.5), allow_nan_stats=True):
         self.a = a
         self.b = b
         self.dist = tfd.LogitNormal(loc, scale, allow_nan_stats=allow_nan_stats)
@@ -128,4 +130,9 @@ def prog(T, current):
     pc = current/T
     x = tf.strings.reduce_join(tf.repeat("=", tf.cast(mult*pc, 'int32')))
     y = tf.strings.reduce_join(tf.repeat("-", tf.cast(mult*(1-pc), 'int32')))
-    tf.print('Progress: \t ', tf.round(pc *1000.), '%\t ', x, y, '', '\r', sep='\b', end='')
+    tf.print('Progress: \t ', tf.round(pc *1000.), '%\t| ', x, y, '| ', '\r', sep='\b', end='')
+
+def save_object(obj, filename):
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    with open(f'saved_models/{filename}-{stamp}.pkl', 'wb') as output:
+        pickle.dump(obj, output, pickle.HIGHEST_PROTOCOL)

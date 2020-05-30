@@ -1,14 +1,16 @@
 from collections import namedtuple
+import pickle
 
 import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
 from reggae.mcmc import MetropolisHastings, Parameter
 from reggae.data_loaders import DataHolder
-from reggae.utilities import exp, mult, jitter_cholesky
+from reggae.utilities import exp, mult, jitter_cholesky, save_object
 from reggae.models.results import GenericResults
 from reggae.mcmc.kernels import LatentKernel
 from reggae.models.gp_kernels import GPKernelSelector
+
 import numpy as np
 from scipy.special import expit
 
@@ -381,6 +383,23 @@ class TranscriptionMCMC(MetropolisHastings):
                 self.acceptance_rates['V'] += 1/self.num_tfs
                 self.acceptance_rates['L'] += 1/self.num_tfs
 
+    def save(self):
+        save_object(self.samples, 'mh-samples')
+        save_object(self.acceptance_rates, 'mh-accrates')
+
+    @staticmethod
+    def load(args):
+        model = TranscriptionMCMC(*args)
+
+        import os
+        path = os.path.join(os.getcwd(), 'saved_models')
+        fs = [os.path.join(path, f) for f in os.listdir(path) if f.startswith('mh')]
+        files = sorted(fs, key=os.path.getmtime)
+        with open(files[-1], 'rb') as f:
+            saved_model = pickle.load(f)
+            model.samples = saved_model['samples']
+            model.acceptance_rates = saved_model['acc_rates']            
+        return model
     @staticmethod
     def initialise_from_state(args, state):
         model = TranscriptionMCMC(*args)

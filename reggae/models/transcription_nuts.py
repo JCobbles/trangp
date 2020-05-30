@@ -1,4 +1,5 @@
-import collections
+from datetime import datetime
+import pickle
 
 import tensorflow as tf
 from tensorflow import math as tfm
@@ -12,13 +13,13 @@ from reggae.models.results import GenericResults, SampleResults
 from reggae.models import Options, GPKernelSelector
 from reggae.mcmc.kernels import LatentKernel, MixedKernel, DelayKernel, GibbsKernel
 from reggae.data_loaders import DataHolder
-from reggae.utilities import rotate, jitter_cholesky, logit, logistic, LogisticNormal, inverse_positivity
+from reggae.utilities import rotate, jitter_cholesky, logit, logistic, LogisticNormal, inverse_positivity, save_object
 
 import numpy as np
-from scipy.special import expit
 
 f64 = np.float64
 PI = tf.constant(np.pi, dtype='float64')
+
 
 class TranscriptionLikelihood():
     def __init__(self, data: DataHolder, options: Options):
@@ -321,7 +322,7 @@ class TranscriptionMixedSampler():
         return prob
 
 
-    def sample(self, T=2000, store_every=10, burn_in=1000, report_every=100, num_chains=4):
+    def sample(self, T=2000, store_every=10, burn_in=1000, report_every=100, num_chains=4, profile=False):
         print('----- Sampling Begins -----')
         
         kernels = [param.kernel for param in self.active_params]
@@ -347,7 +348,14 @@ class TranscriptionMixedSampler():
 
             return samples, is_accepted
 
+
+        if profile:
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            logdir = '.\\logs\\reggae\\%s' % stamp
+            tf.profiler.experimental.start(logdir)
         samples, is_accepted = run_chain()
+        if profile:
+            tf.profiler.experimental.stop()
 
         add_to_previous = (self.samples is not None)
         for param in self.active_params:
@@ -387,16 +395,45 @@ class TranscriptionMixedSampler():
         else:
             kernel_params = [fbar[1], fbar[2]]
             fbar = fbar[0]
-        w =      self.samples[self.state_indices['weights']][0]
-        w_0 =    self.samples[self.state_indices['weights']][1]
+        wbar = tf.stack([logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64')) for _ in range(fbar.shape[0])], axis=0)
+        w_0bar = tf.stack([0.5*tf.ones(self.num_genes, dtype='float64') for _ in range(fbar.shape[0])], axis=0)
+        if self.options.weights:
+            wbar =      self.samples[self.state_indices['kinetics']][2]
+            w_0bar =    self.samples[self.state_indices['kinetics']][3]
         if self.options.delays:
             Δ =  self.samples[self.state_indices['Δ']]
-        return SampleResults(fbar, kbar, k_fbar, Δ, kernel_params, w, w_0, σ2_m, σ2_f)
+        return SampleResults(fbar, kbar, k_fbar, Δ, kernel_params, wbar, w_0bar, σ2_m, σ2_f)
+
+    def save(self, name):
+        save_object({'samples': self.samples, 'is_accepted': self.is_accepted}, f'custom-{name}')
+
+    @staticmethod
+    def load(name, args):
+        model = TranscriptionMixedSampler(*args)
+
+        import os
+        path = os.path.join(os.getcwd(), 'saved_models')
+        fs = [os.path.join(path, f) for f in os.listdir(path) if f.startswith(f'custom-{name}')]
+        files = sorted(fs, key=os.path.getmtime)
+        with open(files[-1], 'rb') as f:
+            saved_model = pickle.load(f)
+            model.samples = saved_model['samples']
+            model.is_accepted = saved_model['is_accepted']
+        for param in model.active_params:
+            index = model.state_indices[param.name]
+            param_samples = model.samples[index]
+            if type(param_samples) is list:
+                param_samples = [[param_samples[i][-1] for i in range(len(param_samples))]]
+
+            param.value = param_samples[-1]
+
+        return model
+
 
     @staticmethod
     def initialise_from_state(args, state):
         model = TranscriptionMixedSampler(*args)
-        model.acceptance_rates = state.acceptance_rates
+        model.is_accepted = state.is_accepted
         model.samples = state.samples
         return model
 
