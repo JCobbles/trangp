@@ -12,6 +12,40 @@ class DataHolder(object):
         self.τ = time[1]
         self.common_indices = time[2]
 
+def load_humanp53(target_genes):
+    with open('data/humanp53/t0to24.tsv', 'r', 1) as f:
+        contents = f.buffer
+        df = pd.read_table(contents, sep='\t', index_col=0)
+
+    columns = ['MCF7, t=0 h, rep1',
+    'MCF7, t=1 h, IR 10Gy, rep1',
+    'MCF7, t=2 h, IR 10Gy, rep1',
+    'MCF7, t=3 h, IR 10Gy, rep1',
+    'MCF7, t=4 h, IR 10Gy, rep1',
+    'MCF7, t=5 h, IR 10Gy, rep1',
+    'MCF7, t=6 h, IR 10Gy, rep1',
+    'MCF7, t=7 h, IR 10Gy, rep1',
+    'MCF7, t=8 h, IR 10Gy, rep1',
+    'MCF7, t=9 h, IR 10Gy, rep1',
+    'MCF7, t=10 h, IR 10Gy, rep1',
+    'MCF7, t=11 h, IR 10Gy, rep1',
+    'MCF7, t=12 h, IR 10Gy, rep1']
+
+    tfs = ['TP53']
+    genes_df = df[df.index.isin(target_genes)][columns]
+
+    # genes_df = genes_df.reindex(['TNFRSF10B', 'SESN1', 'CDKN1A', 'DDB2', 'BIK'])
+
+    tfs_df = df[df.index.isin(tfs)][columns]
+
+    normalised = preprocessing.normalize(np.r_[genes_df.values,tfs_df.values])
+    genes = np.expand_dims(normalised[:-1], 0)
+    tfs = np.expand_dims(np.atleast_2d(normalised[-1]), 0)
+
+    t = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+
+    return (genes_df, np.float64(genes)), (tfs_df, np.float64(tfs)), t
+    
 def load_covid():
     with open('data/covidrld.csv', 'r', 1) as f:
         contents = f.buffer
