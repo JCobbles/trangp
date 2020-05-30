@@ -1,5 +1,6 @@
 from multiprocessing import Pool
 from reggae.models import transcription_mh
+import tensorflow as tf
 
 class ChainResult(object):
     def __init__(self, acceptance_rates, samples):
@@ -33,6 +34,7 @@ def create_chains(model, args, sample_kwargs, num_chains=4, current_state=None):
 
 
 def run_job(args, sample_kwargs):
-    model = transcription_mh.TranscriptionMCMC(*args)
-    model.sample(**sample_kwargs)
-    return ChainResult(model.acceptance_rates, model.samples)
+    with tf.device('/device:cpu:0'):
+        model = transcription_mh.TranscriptionMCMC(*args)
+        model.sample(**sample_kwargs)
+        return ChainResult(model.acceptance_rates, model.samples)

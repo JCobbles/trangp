@@ -32,7 +32,7 @@ class GPKernelSelector():
         }
         self._proposals = {
             'rbf': [lambda v: tfd.TruncatedNormal(v, 0.05, low=0, high=100), 
-                    lambda l2: tfd.TruncatedNormal(l2, 0.05, low=0, high=100)],
+                    lambda l2: tfd.TruncatedNormal(l2, 0.05, low=self._ranges['rbf'][1][0], high=100)],
         }
 
     def __call__(self):
