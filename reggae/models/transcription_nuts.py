@@ -119,14 +119,14 @@ class TranscriptionLikelihood():
             all_states, state_indices, fbar, k_fbar, kbar, wbar, w_0bar, σ2_m, Δ)
         m_pred = self.predict_m(kbar, k_fbar, wbar, fbar, w_0bar, Δ)
         sq_diff = tfm.square(self.data.m_obs - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
-        sq_diff = tf.reduce_sum(sq_diff, axis=0)
+        # sq_diff = tf.reduce_sum(sq_diff, axis=0)
         variance = tf.reshape(σ2_m, (-1, 1))
         if self.preprocessing_variance:
             variance = logit(variance) + self.data.σ2_m_pre # add PUMA variance
         # print(variance.shape, sq_diff.shape)
         # tf.print(variance)
         log_lik = -0.5*tfm.log(2*PI*variance) - 0.5*sq_diff/variance
-        log_lik = tf.reduce_sum(log_lik, axis=1)
+        log_lik = tf.reduce_sum(log_lik)
         return log_lik
 
     @tf.function#(experimental_compile=True)
@@ -141,9 +141,8 @@ class TranscriptionLikelihood():
             variance = self.data.σ2_f_pre
         f_pred = inverse_positivity(fbar)
         sq_diff = tfm.square(self.data.f_obs - tf.transpose(tf.gather(tf.transpose(f_pred),self.data.common_indices)))
-        sq_diff = tf.reduce_sum(sq_diff, axis=0)
         log_lik = -0.5*tfm.log(2*PI*variance) - 0.5*sq_diff/variance
-        log_lik = tf.reduce_sum(log_lik, axis=1)
+        log_lik = tf.reduce_sum(log_lik)
 
         return log_lik
 
