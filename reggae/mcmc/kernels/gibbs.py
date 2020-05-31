@@ -17,17 +17,16 @@ class GibbsKernel(tfp.mcmc.TransitionKernel):
         self.N_p = data.τ.shape[0]
 
     def one_step(self, current_state, previous_kernel_results, all_states):
-        # if self.options.tf_mrna_present: # (Step 5)
         # Prior parameters
         α = self.prior.concentration
         β = self.prior.scale
         # Conditional posterior of inv gamma parameters:
         sq_diff = self.sq_diff_fn(all_states)
         α_post = α + 0.5*self.N_p
-        β_post = β + 0.5*tf.reduce_sum(sq_diff)
+        β_post = β + 0.5*tf.reduce_sum(sq_diff, axis=1)
         # print(α.shape, sq_diff.shape)
         # print('val', β_post.shape, params.σ2_m.value)
-        new_state = tf.repeat(tfd.InverseGamma(α_post, β_post).sample(), sq_diff.shape[0])
+        new_state = tfd.InverseGamma(α_post, β_post).sample()
         new_state = tf.reshape(new_state, (sq_diff.shape[0], 1))
         return new_state, GenericResults(list(), True)
 
