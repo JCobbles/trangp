@@ -14,6 +14,10 @@ class PlotOptions:
     plot_barenco:   bool = False
     num_kinetic_avg:int = 50
     num_hpd:        int = 100
+    true_label:     str = 'True'
+    tf_present:     bool = True
+    for_report:     bool = True
+    ylabel:         str = ''
 
 class Plotter():
     def __init__(self, data, options: PlotOptions):
@@ -21,7 +25,7 @@ class Plotter():
         if self.opt.gene_names is None:
             self.opt.gene_names = np.arange(data.m_obs.shape[1])
         if self.opt.tf_names is None:
-            self.opt.tf_names = [f'TF {i}' for i in range(data.f_obs.shaep[1])]
+            self.opt.tf_names = [f'TF {i}' for i in range(data.f_obs.shape[1])]
 
         self.data = data
         self.τ = data.τ
@@ -41,9 +45,10 @@ class Plotter():
         hpds = abs(hpds - np.expand_dims(k_latest, 2))
 
         width = 18 if num_genes > 10 else 10
-        plt.figure(figsize=(width, 14))
-        plt.suptitle('Transcription ODE Kinetic Parameters')
-        comparison_label = 'True'
+        plt.figure(figsize=(width, 16))
+        if not self.opt.for_report:
+            plt.suptitle('Transcription ODE Kinetic Parameters')
+        comparison_label = self.opt.true_label
         if self.opt.plot_barenco:
             comparison_label = 'Barenco et al.'
             # From Martino paper ... do a rough rescaling so that the scales match.
@@ -68,9 +73,9 @@ class Plotter():
             plt.title(plot_labels[k])
             plt.errorbar(np.arange(num_genes)-0.2, k_latest[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
             plt.legend()
-            plt.xticks(rotation=80)
+            plt.xticks(rotation=70)
         k_latest = np.mean(k_f[-self.opt.num_kinetic_avg:], axis=0)
-
+        plt.tight_layout(h_pad=2.0)
         plt.figure(figsize=(10, 6))
         plotnum = 221
         hpds = list()
@@ -85,8 +90,8 @@ class Plotter():
             if true_k_f is not None:
                 plt.bar(np.arange(num_tfs)+0.1, true_k_f[:, k], width=0.2, color='blue', align='center', label='True')
             plt.errorbar(np.arange(num_tfs)-0.1, k_latest[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
+            plt.xlim(-1, 1)
             plt.legend()
-
 
     def plot_kinetics_convergence(self, k, k_f):
         num_genes = k.shape[1]
@@ -100,7 +105,6 @@ class Plotter():
             
             for i in range(4):
                 plt.plot(k_param[:, i], label=labels[i])
-            plt.axhline(np.mean(k_param[-50:, 3]))
             plt.legend()
             ax.set_title(f'Gene {j}')
         plt.tight_layout()
@@ -118,24 +122,18 @@ class Plotter():
                 plt.plot(k_f[:, i, k], label=labels[k])
             plt.legend()
 
-
-    def plot_genes(self, m_preds, replicate=0):
-        m_preds = m_preds[:, replicate]
-        plt.figure(figsize=(14, 17))
-        plt.suptitle('Genes')
-        num_genes = m_preds[0].shape[0]
-        self.plot_samples(m_preds, self.data.m_obs[replicate], self.opt.gene_names, 
-                          self.opt.num_plot_genes)
-
-    def plot_samples(self, samples, scatters, titles, num_samples, color='grey', scatter_args={}):
+    def plot_samples(self, samples, titles, num_samples, color='grey', scatters=None, scatter_args={}, legend=True):
         num_components = samples[0].shape[0]
-
-        subplot_shape = (1, 1) if num_components < 2 else ((num_components+2)//3, 3)
-
+        subplot_shape = ((num_components+2)//3, 3)
+        if self.opt.for_report:
+            subplot_shape = ((num_components+1)//2, 2)
+        if num_components <= 1:
+            subplot_shape = (1, 1) 
         for j in range(num_components):
             ax = plt.subplot(subplot_shape[0], subplot_shape[1], 1+j)
             plt.title(titles[j])
-            plt.scatter(self.τ[self.common_ind], scatters[j], marker='x', label='Observed', **scatter_args)
+            if scatters is not None:
+                plt.scatter(self.τ[self.common_ind], scatters[j], marker='x', label='Observed', **scatter_args)
             # plt.errorbar([n*10+n for n in range(7)], Y[j], 2*np.sqrt(Y_var[j]), fmt='none', capsize=5)
 
             for s in range(1, num_samples):
@@ -144,7 +142,8 @@ class Plotter():
                     kwargs = {'label':'Samples'}
 
                 plt.plot(self.τ, samples[-s,j,:], color=color, alpha=0.5, **kwargs)
-
+            if j % subplot_shape[1] == 0:
+                plt.ylabel(self.opt.ylabel)
             # HPD:
             bounds = arviz.hpd(samples[-self.opt.num_hpd:,j,:], credible_interval=0.95)
             plt.fill_between(self.τ, bounds[:, 0], bounds[:, 1], color='grey', alpha=0.3, label='95% credibility interval')
@@ -153,16 +152,27 @@ class Plotter():
             ax.set_xticklabels(self.t)
 
             plt.xlabel('Time (h)')
-            plt.legend()
+            if legend:
+                plt.legend()
         plt.tight_layout()
+
+    def plot_genes(self, m_preds, replicate=0, height_mul=2, width_mul=2):
+        m_preds = m_preds[:, replicate]
+        height = np.ceil(m_preds.shape[1]/3)
+        width = 4 if self.opt.for_report else 7
+        plt.figure(figsize=(width*width_mul, height*height_mul))
+        if not self.opt.for_report:
+            plt.suptitle('Genes')
+        self.plot_samples(m_preds, self.opt.gene_names, self.opt.num_plot_genes, 
+                          scatters=self.data.m_obs[replicate], legend=not self.opt.for_report)
 
     def plot_tfs(self, f_samples, replicate=0, scale_observed=False):
         f_samples = f_samples[:, replicate]
         num_tfs = self.data.f_obs.shape[1]
-        plt.figure(figsize=(13, 7*np.ceil(num_tfs/2)))
-        plt.suptitle('Transcription Factors')
+        plt.figure(figsize=(10, 5*np.ceil(num_tfs/2)))
         scatter_args = {'s': 60, 'linewidth': 2, 'color': 'tab:blue'}
-        self.plot_samples(f_samples, self.data.f_obs[replicate], self.opt.tf_names, self.opt.num_plot_tfs,
+        self.plot_samples(f_samples, self.opt.tf_names, self.opt.num_plot_tfs, 
+                          scatters=self.data.f_obs[replicate] if self.opt.tf_present else None,
                           color='cadetblue', scatter_args=scatter_args)
         # if 'σ2_f' in model.params._fields:
         #     σ2_f = model.params.σ2_f.value
@@ -205,31 +215,22 @@ class Plotter():
             plt.plot(w_0[:,j])
         plt.title('Interaction bias')
 
-
-    def generate_report(self, results: SampleResults, m_preds,
-                        true_k=None,
-                        true_k_f=None,
-                        replicate=0,
-                        scale_observed=False):
-
-
+    def summary(self, results: SampleResults, m_preds, true_k=None, true_k_f=None,
+                replicate=0, scale_observed=False):
         self.plot_tfs(results.f, replicate=replicate, scale_observed=scale_observed)
-
         self.plot_genes(m_preds, replicate=replicate)
-
-        self.plot_kinetics_convergence(results.k, results.k_f)
-
         self.plot_kinetics(results.k, results.k_f, true_k=true_k, true_k_f=true_k_f)
-                    
+
+    def convergence_summary(self, results: SampleResults):
+        self.plot_kinetics_convergence(results.k, results.k_f)
         plt.figure(figsize=(10, 4))
         plotnum = 0
-        for name, param in (zip(['Param 1', 'Param 2'], results.kernel_params)):
+        for name, param in zip(['Param 1', 'Param 2'], results.kernel_params):
             ax = plt.subplot(221+plotnum)
             plt.plot(param)
             ax.set_title(name)
             plotnum+=1
 
         self.plot_noises(results.σ2_m, results.σ2_f)
-
         if results.weights is not None:
             self.plot_weights(results.weights)
