@@ -54,14 +54,13 @@ class DelayKernel(tfp.mcmc.TransitionKernel):
                 probs = tfm.exp(probs)
                 probs = probs / tfm.reduce_sum(probs)
                 cumsum = tfm.cumsum(probs)
-                # tf.print(cumsum)
-                u = np.random.uniform()
+                u = tf.random.uniform([], dtype='float64')
                 index = tf.where(cumsum == tf.reduce_min(cumsum[(cumsum - u) > 0]))
                 chosen = Δrange_tf[index[0][0]]
                 new_state = (1-mask) * new_state + mask * chosen
             return new_state
 #         tf.print('final chosen state', new_state)
-        new_state = tf.cond(iteration_number < 200, lambda: current_state, lambda: proceed())
+        new_state = tf.cond(iteration_number < 10, lambda: current_state, lambda: proceed())
         return new_state, GenericResults([iteration_number+1], True)
 
     def bootstrap_results(self, init_state, all_states):
