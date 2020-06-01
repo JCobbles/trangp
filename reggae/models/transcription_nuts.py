@@ -388,7 +388,18 @@ class TranscriptionMixedSampler():
         print()
         print('----- Finished -----')
         return samples, is_accepted
-        
+    
+    def sample_proteins(self, results, num_results):
+        p_samples = list()
+        for i in range(1, num_results+1):
+            p_samples.append(self.likelihood.calculate_protein(results.fbar[-i], results.k_fbar[-i], None)[0])
+        p_samples = np.array(p_samples)
+
+    def sample_latents(self, results, num_results):
+        m_preds = list()
+        for i in range(1, num_results):
+            m_preds.append(self.predict_m_with_results(results, i))
+        return np.array(m_preds)
     def results(self):
         Δ = None
         σ2_f = None
