@@ -3,7 +3,7 @@ import numpy as np
 import arviz
 from reggae.data_loaders import scaled_barenco_data
 from reggae.models.results import SampleResults
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class PlotOptions:
@@ -18,6 +18,7 @@ class PlotOptions:
     tf_present:     bool = True
     for_report:     bool = True
     ylabel:         str = ''
+    kernel_names:   list = field(default_factory=lambda:['Param 1', 'Param 2']) 
 
 class Plotter():
     def __init__(self, data, options: PlotOptions):
@@ -35,7 +36,6 @@ class Plotter():
     def plot_kinetics(self, k, k_f, true_k=None, true_k_f=None):
         k_latest = np.mean(k[-self.opt.num_kinetic_avg:], axis=0)
         num_genes = k.shape[1]
-        num_tfs = k_f.shape[1]
         true_data = None
 
         hpds = list()
@@ -77,26 +77,31 @@ class Plotter():
         k_latest = np.mean(k_f[-self.opt.num_kinetic_avg:], axis=0)
         plt.tight_layout(h_pad=2.0)
         plt.figure(figsize=(10, 6))
-        plotnum = 221
+        self.plot_bar_hpd(k_f, k_latest, self.opt.tf_names, true_var=true_k_f)
+    
+    def plot_bar_hpd(self, var_samples, var, labels, true_var=None): # var = (n, m) num == n == #bars, m #plots
         hpds = list()
-        for i in range(num_tfs):
-            hpds.append(arviz.hpd(k_f[-self.opt.num_hpd:, i,:], credible_interval=0.95))
+        num = var.shape[0]
+        plotnum = var.shape[1]*100 + 21
+        for i in range(num):
+            hpds.append(arviz.hpd(var_samples[-self.opt.num_hpd:, i,:], credible_interval=0.95))
         hpds = np.array(hpds)
-        hpds = abs(hpds - np.expand_dims(k_latest, 2))
-        for k in range(k_f.shape[2]):
+        hpds = abs(hpds - np.expand_dims(var, 2))
+        for k in range(var_samples.shape[2]):
             plt.subplot(plotnum)
             plotnum+=1
-            plt.bar(np.arange(num_tfs)-0.1, k_latest[:, k], width=0.2, tick_label=self.opt.tf_names, label='Model')
-            if true_k_f is not None:
-                plt.bar(np.arange(num_tfs)+0.1, true_k_f[:, k], width=0.2, color='blue', align='center', label='True')
-            plt.errorbar(np.arange(num_tfs)-0.1, k_latest[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
-            plt.xlim(-1, 1)
-            plt.legend()
+            plt.bar(np.arange(num)-0.1, var[:, k], width=0.2, tick_label=labels, label='Model')
+            plt.errorbar(np.arange(num)-0.1, var[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
+            plt.xlim(-1, num)
+            if true_var is not None:
+                plt.bar(np.arange(num)+0.1, true_var[:, k], width=0.2, color='blue', align='center', label='True')
+                plt.legend()
+        plt.tight_layout()
 
     def plot_kinetics_convergence(self, k, k_f):
         num_genes = k.shape[1]
         labels = ['a', 'b', 'd', 's']
-        height = (num_genes//3)*5
+        height = (num_genes//2)*5
         plt.figure(figsize=(14, height))
         plt.suptitle('Convergence of ODE Kinetic Parameters')
         for j in range(num_genes):
@@ -156,7 +161,7 @@ class Plotter():
                 plt.legend()
         plt.tight_layout()
 
-    def plot_genes(self, m_preds, replicate=0, height_mul=2, width_mul=2):
+    def plot_genes(self, m_preds, replicate=0, height_mul=3, width_mul=2):
         m_preds = m_preds[:, replicate]
         height = np.ceil(m_preds.shape[1]/3)
         width = 4 if self.opt.for_report else 7
@@ -169,7 +174,8 @@ class Plotter():
     def plot_tfs(self, f_samples, replicate=0, scale_observed=False):
         f_samples = f_samples[:, replicate]
         num_tfs = self.data.f_obs.shape[1]
-        plt.figure(figsize=(10, 5*np.ceil(num_tfs/2)))
+        width = 8
+        plt.figure(figsize=(width, 3*np.ceil(num_tfs/3)))
         scatter_args = {'s': 60, 'linewidth': 2, 'color': 'tab:blue'}
         self.plot_samples(f_samples, self.opt.tf_names, self.opt.num_plot_tfs, 
                           scatters=self.data.f_obs[replicate] if self.opt.tf_present else None,
@@ -220,12 +226,16 @@ class Plotter():
         self.plot_tfs(results.f, replicate=replicate, scale_observed=scale_observed)
         self.plot_genes(m_preds, replicate=replicate)
         self.plot_kinetics(results.k, results.k_f, true_k=true_k, true_k_f=true_k_f)
+        plt.figure()
+        kp = np.array(results.kernel_params).swapaxes(0,1)
+        kp_latest = np.mean(kp[-50:], axis=0)
+        self.plot_bar_hpd(kp, kp_latest, self.opt.kernel_names)
 
     def convergence_summary(self, results: SampleResults):
         self.plot_kinetics_convergence(results.k, results.k_f)
         plt.figure(figsize=(10, 4))
         plotnum = 0
-        for name, param in zip(['Param 1', 'Param 2'], results.kernel_params):
+        for name, param in zip(self.opt.kernel_names, results.kernel_params):
             ax = plt.subplot(221+plotnum)
             plt.plot(param)
             ax.set_title(name)

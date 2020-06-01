@@ -34,6 +34,7 @@ class GPKernelSelector():
             'rbf': [lambda v: tfd.TruncatedNormal(v, 0.05, low=0, high=100), 
                     lambda l2: tfd.TruncatedNormal(l2, 0.05, low=self._ranges['rbf'][1][0], high=100)],
         }
+        self._names = {'rbf': ['v','l2'], 'mlp': ['w', 'b']}
 
     def __call__(self):
         '''Calculates kernel covariance matrix'''
@@ -54,7 +55,8 @@ class GPKernelSelector():
 
     def ranges(self):
         return self._ranges[self.kernel]
-
+    def names(self):
+        return self._names[self.kernel]
     def priors(self):
         return self._priors[self.kernel]
 
