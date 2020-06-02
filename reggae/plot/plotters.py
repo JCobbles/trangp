@@ -4,6 +4,7 @@ import arviz
 from reggae.data_loaders import scaled_barenco_data
 from reggae.models.results import SampleResults
 from dataclasses import dataclass, field
+from matplotlib.animation import FuncAnimation
 
 @dataclass
 class PlotOptions:
@@ -18,7 +19,15 @@ class PlotOptions:
     tf_present:     bool = True
     for_report:     bool = True
     ylabel:         str = ''
+    protein_present:bool = True
     kernel_names:   list = field(default_factory=lambda:['Param 1', 'Param 2']) 
+
+# From Martino paper ... do a rough rescaling so that the scales match.
+barenco = np.stack([
+    np.array([2.6, 1.5, 0.5, 0.2, 1.35])[[0, 4, 2, 3, 1]],
+    (np.array([1.2, 1.6, 1.75, 3.2, 2.3])*0.8/3.2)[[0, 4, 2, 3, 1]],
+    (np.array([3, 0.8, 0.7, 1.8, 0.7])/1.8)[[0, 4, 2, 3, 1]]
+]).T
 
 class Plotter():
     def __init__(self, data, options: PlotOptions):
@@ -37,6 +46,7 @@ class Plotter():
         k_latest = np.mean(k[-self.opt.num_kinetic_avg:], axis=0)
         num_genes = k.shape[1]
         true_data = None
+        plot_labels = ['Initial Conditions', 'Basal rates', 'Decay rates', 'Sensitivities']
 
         hpds = list()
         for j in range(num_genes):
@@ -51,20 +61,17 @@ class Plotter():
         comparison_label = self.opt.true_label
         if self.opt.plot_barenco:
             comparison_label = 'Barenco et al.'
-            # From Martino paper ... do a rough rescaling so that the scales match.
-            B_barenco = np.array([2.6, 1.5, 0.5, 0.2, 1.35])[[0, 4, 2, 3, 1]]
-            B_barenco = B_barenco/np.mean(B_barenco)*np.mean(k_latest[:, 1])
-            S_barenco = (np.array([3, 0.8, 0.7, 1.8, 0.7])/1.8)[[0, 4, 2, 3, 1]]
-            S_barenco = S_barenco/np.mean(S_barenco)*np.mean(k_latest[:, 3])
-            D_barenco = (np.array([1.2, 1.6, 1.75, 3.2, 2.3])*0.8/3.2)[[0, 4, 2, 3, 1]]
-            D_barenco = D_barenco/np.mean(D_barenco)*np.mean(k_latest[:, 2])
-            true_data = np.array([np.zeros(num_genes), B_barenco, D_barenco, S_barenco]).T
+            if self.opt.protein_present:
+                true_data = barenco / np.mean(barenco, axis=0) * np.mean(k_latest[1:], axis=0)
+                true_data = np.c_[np.zeros(num_genes), true_data]
+            else: 
+                true_data = barenco / np.mean(barenco, axis=0) * np.mean(k_latest, axis=0)
+                plot_labels = plot_labels[1:]
         elif true_k is not None:
             true_data = true_k
-        plot_labels = ['Initial Conditions', 'Basal rates', 'Decay rates', 'Sensitivities']
 
         plotnum = 421
-        for k in range(4):
+        for k in range(k_latest.shape[1]):
             plt.subplot(plotnum)
             plotnum+=1
             plt.bar(np.arange(num_genes)-0.2, k_latest[:, k], width=0.4, tick_label=self.opt.gene_names, label='Model')
@@ -74,10 +81,11 @@ class Plotter():
             plt.errorbar(np.arange(num_genes)-0.2, k_latest[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
             plt.legend()
             plt.xticks(rotation=70)
-        k_latest = np.mean(k_f[-self.opt.num_kinetic_avg:], axis=0)
         plt.tight_layout(h_pad=2.0)
-        plt.figure(figsize=(10, 6))
-        self.plot_bar_hpd(k_f, k_latest, self.opt.tf_names, true_var=true_k_f)
+        if self.opt.protein_present:
+            k_latest = np.mean(k_f[-self.opt.num_kinetic_avg:], axis=0)
+            plt.figure(figsize=(10, 6))
+            self.plot_bar_hpd(k_f, k_latest, self.opt.tf_names, true_var=true_k_f)
     
     def plot_bar_hpd(self, var_samples, var, labels, true_var=None): # var = (n, m) num == n == #bars, m #plots
         hpds = list()
@@ -104,30 +112,27 @@ class Plotter():
         height = (num_genes//2)*5
         plt.figure(figsize=(14, height))
         plt.suptitle('Convergence of ODE Kinetic Parameters')
-        for j in range(num_genes):
-            ax = plt.subplot(num_genes, 2, j+1)
-            k_param = k[:, j, :]
-            
-            for i in range(4):
-                plt.plot(k_param[:, i], label=labels[i])
+        self.plot_kinetics_convergence_group(k, labels, 'Gene')
+        if self.opt.protein_present:
+            width = 14 if k_f.shape[1] > 1 else 6
+            plt.figure(figsize=(width, 4*np.ceil(k_f.shape[1]/2)))
+            plt.suptitle('Translation Convergence')
+            labels = ['a', 'δ']
+            self.plot_kinetics_convergence_group(k_f, labels, 'TF')
+
+    def plot_kinetics_convergence_group(self, k, labels, title_prefix):
+        num = k.shape[1]
+        horizontal_subplots = min(2, num)
+        for j in range(num):
+            ax = plt.subplot(num, horizontal_subplots, j+1)
+            ax.set_title(f'{title_prefix} {j}')            
+            for v in range(k.shape[2]):
+                plt.plot(k[:, j, v], label=labels[v])
             plt.legend()
-            ax.set_title(f'Gene {j}')
         plt.tight_layout()
 
-        num_tfs = k_f.shape[1]
-        width = 14 if num_tfs > 1 else 6
-        plt.figure(figsize=(width, 4*np.ceil(num_tfs/2)))
-        plt.suptitle('Translation Convergence')
-        labels = ['a', 'δ']
-        horizontal_subplots = 21 if num_tfs > 1 else 11
-        for i in range(num_tfs):
-            ax = plt.subplot(num_tfs*100 + horizontal_subplots + i)
-            ax.set_title(f'TF {i}')
-            for k in range(k_f.shape[2]):
-                plt.plot(k_f[:, i, k], label=labels[k])
-            plt.legend()
-
-    def plot_samples(self, samples, titles, num_samples, color='grey', scatters=None, scatter_args={}, legend=True):
+    def plot_samples(self, samples, titles, num_samples, color='grey', scatters=None, 
+                     scatter_args={}, legend=True, margined=False):
         num_components = samples[0].shape[0]
         subplot_shape = ((num_components+2)//3, 3)
         if self.opt.for_report:
@@ -155,7 +160,8 @@ class Plotter():
 
             plt.xticks(self.t)
             ax.set_xticklabels(self.t)
-
+            if margined:
+                plt.ylim(min(samples[-1, j])-2, max(samples[-1, j]) + 2)
             plt.xlabel('Time (h)')
             if legend:
                 plt.legend()
@@ -174,12 +180,13 @@ class Plotter():
     def plot_tfs(self, f_samples, replicate=0, scale_observed=False):
         f_samples = f_samples[:, replicate]
         num_tfs = self.data.f_obs.shape[1]
-        width = 8
-        plt.figure(figsize=(width, 3*np.ceil(num_tfs/3)))
+        width = 8 if num_tfs > 1 else 6
+        plt.figure(figsize=(width, 4*np.ceil(num_tfs/3)))
         scatter_args = {'s': 60, 'linewidth': 2, 'color': 'tab:blue'}
         self.plot_samples(f_samples, self.opt.tf_names, self.opt.num_plot_tfs, 
                           scatters=self.data.f_obs[replicate] if self.opt.tf_present else None,
-                          color='cadetblue', scatter_args=scatter_args)
+                          color='cadetblue', scatter_args=scatter_args, margined=True)
+        
         # if 'σ2_f' in model.params._fields:
         #     σ2_f = model.params.σ2_f.value
         #     plt.errorbar(τ[common_indices], f_observed[0], 2*np.sqrt(σ2_f[0]), 
@@ -220,6 +227,23 @@ class Plotter():
         for j in range(self.opt.gene_names.shape[0]):
             plt.plot(w_0[:,j])
         plt.title('Interaction bias')
+
+    def anim_latent(self, results, index=0, replicate=0):
+        fig = plt.figure()
+        ax = plt.axes(xlim=(-1, 13), ylim=(-1, 13))
+        line, = ax.plot([], [], lw=3)
+        f_samples = results.f
+        def init():
+            line.set_data([], [])
+            return line,
+        def animate(i):
+            x = np.linspace(0, 12, f_samples.shape[3])
+            y = f_samples[i*10, replicate, index]
+            line.set_data(x, y)
+            return line,
+        anim = FuncAnimation(fig, animate, init_func=init,
+                                    frames=f_samples.shape[0]//10, interval=50, blit=True)
+        return anim.to_html5_video()
 
     def summary(self, results: SampleResults, m_preds, true_k=None, true_k_f=None,
                 replicate=0, scale_observed=False):

@@ -39,6 +39,8 @@ class SampleResults:
         return logit(self.kbar).numpy()
     @property
     def k_f(self):
+        if self.k_fbar is None:
+            return None
         return logit(self.k_fbar).numpy()
     @property
     def weights(self):

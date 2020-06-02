@@ -23,16 +23,16 @@ class GPKernelSelector():
         min_dist = min(min_dist, 2)
         self._ranges = {
             'rbf': [(f64(1e-4), f64(5)), #1+max(np.var(data.f_obs, axis=2))
-                    (f64(min_dist**2)-0.2, f64(data.t[-1]**2))],
+                    (f64(min_dist**2)-1.2, f64(data.t[-1]**2))],
             'mlp': [(f64(1), f64(10)), (f64(3.5), f64(20))],
         }
         self._priors = {
-            'rbf': [tfd.Uniform(f64(2), f64(5)), tfd.InverseGamma(f64(0.01), f64(0.01))],
+            'rbf': [tfd.Uniform(f64(2), f64(10)), tfd.InverseGamma(f64(0.01), f64(0.01))],
             'mlp': [tfd.Uniform(f64(3.5), f64(10)), tfd.InverseGamma(f64(0.01), f64(0.01))],
         }
         self._proposals = {
             'rbf': [lambda v: tfd.TruncatedNormal(v, 0.05, low=0, high=100), 
-                    lambda l2: tfd.TruncatedNormal(l2, 0.05, low=self._ranges['rbf'][1][0], high=100)],
+                    lambda l2: tfd.TruncatedNormal(l2, 0.05, low=0, high=100)],
         }
         self._names = {'rbf': ['v','l2'], 'mlp': ['w', 'b']}
 

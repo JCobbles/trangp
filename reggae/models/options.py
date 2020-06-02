@@ -8,3 +8,4 @@ class Options:
     joint_latent:           bool = True
     initial_step_sizes:     dict = field(default_factory=dict)
     weights:                bool = True
+    initial_conditions:     bool = True

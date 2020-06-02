@@ -1,5 +1,5 @@
 from multiprocessing import Pool
-from reggae.models import transcription_mh
+import reggae
 import tensorflow as tf
 
 class ChainResult(object):
