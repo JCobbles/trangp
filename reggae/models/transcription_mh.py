@@ -5,25 +5,20 @@ import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
 from reggae.mcmc import MetropolisHastings, Parameter
+from reggae.models import GPKernelSelector
 from reggae.data_loaders import DataHolder
 from reggae.utilities import exp, mult, jitter_cholesky, save_object
 from reggae.models.results import GenericResults
-from reggae.mcmc.kernels import LatentKernel
-from reggae.models.gp_kernels import GPKernelSelector
+import reggae
 
 import numpy as np
 from scipy.special import expit
 
 f64 = np.float64
 
-class Options():
-    def __init__(self, preprocessing_variance=True, tf_mrna_present=True, delays=False):
-        self.preprocessing_variance = preprocessing_variance
-        self.tf_mrna_present = tf_mrna_present
-        self.delays = delays
 
 class TranscriptionLikelihood():
-    def __init__(self, data: DataHolder, options: Options):
+    def __init__(self, data: DataHolder, options):
         self.options = options
         self.data = data
         self.num_tfs = data.f_obs.shape[1]
@@ -54,12 +49,19 @@ class TranscriptionLikelihood():
 
     def predict_m(self, kbar, δbar, w, fbar, w_0):
         # Take relevant parameters out of log-space
-        a_j, b_j, d_j, s_j = (np.exp(kbar[:, i]).reshape(-1, 1) for i in range(4))
+        kin = (np.exp(kbar[:, i]).reshape(-1, 1) for i in range(kbar.shape[1]))
+        if self.options.initial_conditions:
+            a_j, b_j, d_j, s_j = kin
+        else:
+            b_j, d_j, s_j = kin
+
         τ = self.data.τ
         N_p = self.data.τ.shape[0]
 
         # Calculate p_i vector
-        p_i = self.calculate_protein(fbar, δbar)
+        p_i = np.log(1+np.exp(fbar))
+        if self.options.tf_mrna_present:
+            p_i = self.calculate_protein(fbar, δbar)
 
         # Calculate m_pred
         m_pred = np.zeros((self.num_replicates, self.num_genes, N_p), dtype='float64')
@@ -69,14 +71,17 @@ class TranscriptionLikelihood():
             interactions = w[:, 0][:, None]*np.log(p_i[r]+1e-100) + w_0[:, None]# tf.matmul(w, tfm.log(p_i[r]+1e-100)) + w_0[:, None]
             G = expit(interactions) # TF Activation Function (sigmoid)
             sum_term = G * exp(d_j*τ)
-            integrals = tf.concat([np.zeros((self.num_genes, 1), dtype='float64'), # Trapezoid rule
+            integrals = np.concatenate([np.zeros((self.num_genes, 1), dtype='float64'), # Trapezoid rule
                                 0.5*resolution*np.cumsum(sum_term[:, :-1] + sum_term[:, 1:], axis=1)], axis=1) 
             exp_dt = exp(-d_j*τ)
             integrals = mult(exp_dt, integrals)
 
             mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
             mask[r] = 1
-            m_pred_r = b_j/d_j + mult((a_j-b_j/d_j), exp_dt) + s_j*integrals
+            m_pred_r = b_j/d_j + s_j*integrals
+            if self.options.initial_conditions:
+                m_pred_r += mult((a_j-b_j/d_j), exp_dt)
+
             m_pred = (1-mask)*m_pred + mask * m_pred_r
         return m_pred
 
@@ -144,7 +149,7 @@ class TranscriptionMCMC(MetropolisHastings):
     Data is a tuple (m, f) of shapes (num, time)
     time is a tuple (t, τ, common_indices)
     '''
-    def __init__(self, data: DataHolder, options: Options):
+    def __init__(self, data: DataHolder, options):
         self.data = data
         min_dist = min(data.t[1:]-data.t[:-1])
         self.N_p = data.τ.shape[0]
@@ -177,32 +182,29 @@ class TranscriptionMCMC(MetropolisHastings):
 
 
         # Translation kinetic parameters
-        δbar = Parameter('δbar', tfd.Normal(a, b2), f64(-0.3), step_size=0.3)
+        δbar = Parameter('δbar', tfd.Normal(a, b2), f64(-0.3), step_size=0.05)
         δbar.proposal_dist=lambda mu:tfd.Normal(mu, δbar.step_size)
         # White noise for genes
-        σ2_m = Parameter('σ2_m', tfd.InverseGamma(f64(0.01), f64(0.01)), 1e-4*np.ones(self.num_genes), step_size=0.5)
-        σ2_m.proposal_dist=lambda mu: tfd.TruncatedNormal(mu, σ2_m.step_size, low=0, high=5)
+        σ2_m = Parameter('σ2_m', tfd.InverseGamma(f64(0.01), f64(0.01)), 1e-4*np.ones(self.num_genes), step_size=0.01)
+        σ2_m.proposal_dist=lambda mu: tfd.TruncatedNormal(mu, σ2_m.step_size, low=0, high=0.1)
         # Transcription kinetic parameters
+        constraint_index = 2 if self.options.initial_conditions else 1
         def constrain_kbar(kbar, gene):
             '''Constrains a given row in kbar'''
-#             if gene == 3:
-#                 kbar[2] = np.log(0.8)
-#                 kbar[3] = np.log(1.0)
+            # if gene == 3:
+            #     kbar[constraint_index] = np.log(0.8)
+            #     kbar[constraint_index+1] = np.log(1.0)
             kbar[kbar < -10] = -10
             kbar[kbar > 3] = 3
             return kbar
-        kbar_initial = -0.1*np.float64(np.c_[
-            np.ones(self.num_genes), # a_j
-            np.ones(self.num_genes), # b_j
-            np.ones(self.num_genes), # d_j
-            np.ones(self.num_genes)  # s_j
-        ])
+        num_var = 4 if self.options.initial_conditions else 3
+        kbar_initial = -0.1*np.ones((5, num_var), dtype='float64')
         for j, k in enumerate(kbar_initial):
             kbar_initial[j] = constrain_kbar(k, j)
         kbar = Parameter('kbar',
             tfd.Normal(a, b2), 
             kbar_initial,
-            constraint=constrain_kbar, step_size=0.25*tf.ones(4, dtype='float64'))
+            constraint=constrain_kbar, step_size=0.05*tf.ones(num_var, dtype='float64'))
         kbar.proposal_dist=lambda mu: tfd.MultivariateNormalDiag(mu, kbar.step_size)
         
         if not options.preprocessing_variance:
@@ -383,17 +385,16 @@ class TranscriptionMCMC(MetropolisHastings):
                 self.acceptance_rates['V'] += 1/self.num_tfs
                 self.acceptance_rates['L'] += 1/self.num_tfs
 
-    def save(self):
-        save_object(self.samples, 'mh-samples')
-        save_object(self.acceptance_rates, 'mh-accrates')
+    def save(self, name=''):
+        save_object({'samples':self.samples, 'acc_rates': self.acceptance_rates}, f'mh{name}')
 
     @staticmethod
-    def load(args):
+    def load(args, name=''):
         model = TranscriptionMCMC(*args)
 
         import os
         path = os.path.join(os.getcwd(), 'saved_models')
-        fs = [os.path.join(path, f) for f in os.listdir(path) if f.startswith('mh')]
+        fs = [os.path.join(path, f) for f in os.listdir(path) if f.startswith(f'mh{name}')]
         files = sorted(fs, key=os.path.getmtime)
         with open(files[-1], 'rb') as f:
             saved_model = pickle.load(f)
