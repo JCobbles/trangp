@@ -12,7 +12,6 @@ class PlotOptions:
     num_plot_tfs:   int = 20
     gene_names:     list = None
     tf_names:       list = None
-    plot_barenco:   bool = False
     num_kinetic_avg:int = 50
     num_hpd:        int = 100
     true_label:     str = 'True'
@@ -22,12 +21,6 @@ class PlotOptions:
     protein_present:bool = True
     kernel_names:   list = field(default_factory=lambda:['Param 1', 'Param 2']) 
 
-# From Martino paper ... do a rough rescaling so that the scales match.
-barenco = np.stack([
-    np.array([2.6, 1.5, 0.5, 0.2, 1.35])[[0, 4, 2, 3, 1]],
-    (np.array([1.2, 1.6, 1.75, 3.2, 2.3])*0.8/3.2)[[0, 4, 2, 3, 1]],
-    (np.array([3, 0.8, 0.7, 1.8, 0.7])/1.8)[[0, 4, 2, 3, 1]]
-]).T
 
 class Plotter():
     def __init__(self, data, options: PlotOptions):
@@ -45,49 +38,26 @@ class Plotter():
     def plot_kinetics(self, k, k_f, true_k=None, true_k_f=None):
         k_latest = np.mean(k[-self.opt.num_kinetic_avg:], axis=0)
         num_genes = k.shape[1]
-        true_data = None
         plot_labels = ['Initial Conditions', 'Basal rates', 'Decay rates', 'Sensitivities']
 
-        hpds = list()
-        for j in range(num_genes):
-            hpds.append(arviz.hpd(k[-self.opt.num_hpd:, j,:], credible_interval=0.95))
-        hpds = np.array(hpds)
-        hpds = abs(hpds - np.expand_dims(k_latest, 2))
 
         width = 18 if num_genes > 10 else 10
-        plt.figure(figsize=(width, 16))
+        plt.figure(figsize=(width, 10))
         if not self.opt.for_report:
             plt.suptitle('Transcription ODE Kinetic Parameters')
-        comparison_label = self.opt.true_label
-        if self.opt.plot_barenco:
-            comparison_label = 'Barenco et al.'
-            if self.opt.protein_present:
-                true_data = barenco / np.mean(barenco, axis=0) * np.mean(k_latest[1:], axis=0)
-                true_data = np.c_[np.zeros(num_genes), true_data]
-            else: 
-                true_data = barenco / np.mean(barenco, axis=0) * np.mean(k_latest, axis=0)
-                plot_labels = plot_labels[1:]
-        elif true_k is not None:
-            true_data = true_k
 
-        plotnum = 421
-        for k in range(k_latest.shape[1]):
-            plt.subplot(plotnum)
-            plotnum+=1
-            plt.bar(np.arange(num_genes)-0.2, k_latest[:, k], width=0.4, tick_label=self.opt.gene_names, label='Model')
-            if true_data is not None:
-                plt.bar(np.arange(num_genes)+0.2, true_data[:, k], width=0.4, color='blue', align='center', label=comparison_label)
-            plt.title(plot_labels[k])
-            plt.errorbar(np.arange(num_genes)-0.2, k_latest[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
-            plt.legend()
-            plt.xticks(rotation=70)
+        if k_latest.shape[1] < 4:
+            plot_labels = plot_labels[1:]
+
+        self.plot_bar_hpd(k, k_latest, self.opt.gene_names, true_var=true_k, width=0.2, rotation=60)
         plt.tight_layout(h_pad=2.0)
+
         if self.opt.protein_present:
             k_latest = np.mean(k_f[-self.opt.num_kinetic_avg:], axis=0)
             plt.figure(figsize=(10, 6))
             self.plot_bar_hpd(k_f, k_latest, self.opt.tf_names, true_var=true_k_f)
     
-    def plot_bar_hpd(self, var_samples, var, labels, true_var=None): # var = (n, m) num == n == #bars, m #plots
+    def plot_bar_hpd(self, var_samples, var, labels, true_var=None, width=0.1, titles=None, rotation=0):
         hpds = list()
         num = var.shape[0]
         plotnum = var.shape[1]*100 + 21
@@ -98,11 +68,14 @@ class Plotter():
         for k in range(var_samples.shape[2]):
             plt.subplot(plotnum)
             plotnum+=1
-            plt.bar(np.arange(num)-0.1, var[:, k], width=0.2, tick_label=labels, label='Model')
-            plt.errorbar(np.arange(num)-0.1, var[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
+            plt.bar(np.arange(num)-width, var[:, k], width=2*width, tick_label=labels, label='Model')
+            plt.errorbar(np.arange(num)-width, var[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
             plt.xlim(-1, num)
+            plt.xticks(rotation=rotation)
+            if titles is not None:
+                plt.title(titles[k])
             if true_var is not None:
-                plt.bar(np.arange(num)+0.1, true_var[:, k], width=0.2, color='blue', align='center', label='True')
+                plt.bar(np.arange(num)+width, true_var[:, k], width=2*width, color='blue', align='center', label=self.opt.true_label)
                 plt.legend()
         plt.tight_layout()
 
@@ -177,7 +150,7 @@ class Plotter():
         self.plot_samples(m_preds, self.opt.gene_names, self.opt.num_plot_genes, 
                           scatters=self.data.m_obs[replicate], legend=not self.opt.for_report)
 
-    def plot_tfs(self, f_samples, replicate=0, scale_observed=False):
+    def plot_tfs(self, f_samples, replicate=0, scale_observed=False, plot_barenco=False):
         f_samples = f_samples[:, replicate]
         num_tfs = self.data.f_obs.shape[1]
         width = 8 if num_tfs > 1 else 6
@@ -198,7 +171,7 @@ class Plotter():
         #     if scale_observed:
         #         f_obs = f_obs / np.mean(f_obs) * np.mean(f_i)
 
-        if self.opt.plot_barenco:
+        if plot_barenco:
             barenco_f, _ = scaled_barenco_data(np.mean(f_samples[-10:], axis=0))
             plt.scatter(self.τ[self.common_ind], barenco_f, marker='x', s=60, linewidth=3, label='Barenco et al.')
 

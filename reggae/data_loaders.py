@@ -177,3 +177,12 @@ def scaled_barenco_data(f):
     measured_p53 = 0
     
     return barencof, measured_p53
+
+
+# From barenco paper
+def barenco_params():
+    return np.stack([
+        np.array([2.6, 1.5, 0.5, 0.2, 1.35])[[0, 4, 2, 3, 1]],
+        (np.array([1.2, 1.6, 1.75, 3.2, 2.3])*0.8/3.2)[[0, 4, 2, 3, 1]],
+        (np.array([3, 0.8, 0.7, 1.8, 0.7])/1.8)[[0, 4, 2, 3, 1]]
+    ]).T
