@@ -1,13 +1,13 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from reggae.models.results import MixedKernelResults
+from reggae.models.results import MixedKernelResults, GenericResults
 from reggae.utilities import prog
 
 from inspect import signature
 
 class MixedKernel(tfp.mcmc.TransitionKernel):
-    def __init__(self, kernels, send_all_states, T):
+    def __init__(self, kernels, send_all_states, T, skip=None):
         '''
         send_all_states is a boolean array of size |kernels| indicating which components of the state
         have kernels whose log probability depends on the state of others, in which case MixedKernel
@@ -19,6 +19,7 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
         self.num_kernels = len(kernels)
         self.last_m_log_lik = tf.Variable(tf.zeros((self.num_kernels)))
         self.one_step_receives_state = [len(signature(k.one_step).parameters)>2 for k in kernels]
+        self.skip = skip
         super().__init__()
 
     def one_step(self, current_state, previous_kernel_results):
@@ -30,13 +31,19 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
         is_accepted = list()
         inner_results = list()
         for i in range(self.num_kernels):
-            # if self.send_all_states[i]:
-            #     wrapped_state_i = current_state[i]
-            #     if type(wrapped_state_i) is not list:
-            #         wrapped_state_i = [wrapped_state_i]
+            if self.skip is not None and self.skip[i]:
+                # print(previous_kernel_results)
+                is_accepted.append(previous_kernel_results.inner_results[i].is_accepted)
+                new_state.append(current_state[i])
+                inner_results.append(previous_kernel_results.inner_results[i])
+                continue
+            if self.send_all_states[i]:
+                wrapped_state_i = current_state[i]
+                if type(wrapped_state_i) is not list:
+                    wrapped_state_i = [wrapped_state_i]
 
-            #     previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
-            #         target_log_prob=self.kernels[i].target_log_prob_fn_fn(current_state)(*wrapped_state_i))
+                previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
+                    target_log_prob=self.kernels[i].target_log_prob_fn_fn(current_state)(*wrapped_state_i))
 
             args = []
             try:
@@ -72,8 +79,6 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
         for i in range(self.num_kernels):
             self.kernels[i].all_states_hack = init_state
 
-            if hasattr(self.kernels[i], 'inner_kernel'):
-                self.kernels[i].inner_kernel.all_states_hack = init_state
             if self.one_step_receives_state[i]:
                 results = self.kernels[i].bootstrap_results(init_state[i], init_state)
                 inner_kernels_bootstraps.append(results)
