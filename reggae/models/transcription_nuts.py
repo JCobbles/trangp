@@ -59,13 +59,19 @@ class TranscriptionLikelihood():
     @tf.function
     def predict_m(self, kbar, k_fbar, wbar, fbar, w_0bar, Δ):
         # Take relevant parameters out of log-space
-        a_j, b_j, d_j, s_j = (tf.reshape(logit(kbar[:, i]), (-1, 1)) for i in range(4))
+        kin = (tf.reshape(logit(kbar[:, i]), (-1, 1)) for i in range(kbar.shape[1]))
+        if self.options.initial_conditions:
+            a_j, b_j, d_j, s_j = kin
+        else:
+            b_j, d_j, s_j = kin
         w = logit(wbar)
         w_0 = tf.reshape(logit(w_0bar), (-1, 1))
         τ = self.data.τ
         N_p = self.data.τ.shape[0]
 
-        p_i = self.calculate_protein(fbar, k_fbar, Δ)
+        p_i = inverse_positivity(fbar)
+        if self.options.tf_mrna_present:
+            p_i = self.calculate_protein(fbar, k_fbar, Δ)
 
         # Calculate m_pred
         resolution = τ[1]-τ[0]
@@ -77,14 +83,18 @@ class TranscriptionLikelihood():
         exp_dt = tfm.exp(-d_j*τ)
         integrals = tfm.multiply(exp_dt, integrals)
 
-        m_pred = b_j/d_j + tfm.multiply((a_j-b_j/d_j), exp_dt) + s_j*integrals
+        m_pred = b_j/d_j + s_j*integrals
+        if self.options.initial_conditions:
+            m_pred += tfm.multiply((a_j-b_j/d_j), exp_dt)
         return m_pred
 
     def get_parameters_from_state(self, all_states, state_indices,
                                   fbar=None, k_fbar=None, kbar=None, 
                                   wbar=None, w_0bar=None, σ2_m=None, Δ=None):
         kbar = all_states[state_indices['kinetics']][0] if kbar is None else kbar
-        k_fbar = all_states[state_indices['kinetics']][1] if k_fbar is None else k_fbar
+        k_fbar = None
+        if self.options.tf_mrna_present:
+            k_fbar = all_states[state_indices['kinetics']][1] if k_fbar is None else k_fbar
         wbar = logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64'))
         w_0bar = 0.5*tf.ones(self.num_genes, dtype='float64')
         if self.options.weights:
@@ -239,48 +249,44 @@ class TranscriptionMixedSampler():
         w_0_prior = LogisticNormal(f64(-1), f64(1))
         w_0_initial = 0.5*tf.ones(self.num_genes, dtype='float64')
 
-        kbar_initial = 0.6*tf.ones((self.num_genes, 4), dtype='float64')
+        num_kin = 4 if self.options.initial_conditions else 3
+        kbar_initial = 0.6*tf.ones((self.num_genes, num_kin), dtype='float64')
 
-        if options.weights:
-            def kbar_log_prob(all_states):
-                def kbar_log_prob_fn(kbar, k_fbar, wbar, w_0bar):
-                    k_m = logit(kbar)
-                    k_f = logit(k_fbar)
-                    new_prob = tf.reduce_sum(self.likelihood.genes(
-                        all_states=all_states,
-                        state_indices=self.state_indices,
-                        kbar=kbar,
-                        k_fbar=k_fbar,
-                        wbar=wbar,
-                        w_0bar=w_0bar
-                    ))
-                    new_prob += tf.reduce_sum(self.params.kinetics.prior[0].log_prob(k_m))
-                    new_prob += tf.reduce_sum(self.params.kinetics.prior[1].log_prob(k_f))
+        def kbar_log_prob(all_states):
+            def kbar_log_prob_fn(*args): #kbar, k_fbar, wbar, w_0bar
+                kbar = args[0]
+                new_prob = 0
+                k_m = logit(kbar)
+                lik_args = {'kbar': kbar}
+                new_prob += tf.reduce_sum(self.params.kinetics.prior[0].log_prob(k_m))
+                if options.tf_mrna_present:
+                    k_fbar = args[1]
+                    lik_args['k_fbar'] = k_fbar
+                    new_prob += tf.reduce_sum(self.params.kinetics.prior[1].log_prob(logit(k_fbar)))
+                if options.weights:
+                    wbar, w_0bar = args[2], args[3]
+                    lik_args['wbar'] = wbar
+                    lik_args['w_0bar'] = w_0bar
                     new_prob += tf.reduce_sum(self.params.kinetics.prior[2].log_prob(logit(wbar))) 
                     new_prob += tf.reduce_sum(self.params.kinetics.prior[3].log_prob(logit(w_0bar)))
-                    return tf.reduce_sum(new_prob)
-                return kbar_log_prob_fn
-        else:
-            def kbar_log_prob(all_states):
-                def kbar_log_prob_fn(kbar, k_fbar):
-                    k_m = logit(kbar)
-                    k_f = logit(k_fbar)
-                    new_prob = tf.reduce_sum(self.likelihood.genes(
-                        all_states=all_states,
-                        state_indices=self.state_indices,
-                        kbar=kbar,
-                        k_fbar=k_fbar,
-                    ))
-                    new_prob += tf.reduce_sum(self.params.kinetics.prior[0].log_prob(k_m))
-                    new_prob += tf.reduce_sum(self.params.kinetics.prior[1].log_prob(k_f))
-                    return tf.reduce_sum(new_prob)
-                return kbar_log_prob_fn
+
+                new_prob += tf.reduce_sum(self.likelihood.genes(
+                    all_states=all_states,
+                    state_indices=self.state_indices,
+                    **lik_args
+                ))
+                
+                return tf.reduce_sum(new_prob)
+            return kbar_log_prob_fn
 
 
         k_fbar_initial = 0.7*tf.ones((self.num_tfs,), dtype='float64')
 
-        kinetics_initial = [kbar_initial, k_fbar_initial]
-        kinetics_priors = [LogisticNormal(0.01, 5), LogisticNormal(0.1, 5)]
+        kinetics_initial = [kbar_initial]
+        kinetics_priors = [LogisticNormal(0.01, 5)]
+        if options.tf_mrna_present:
+            kinetics_initial += [k_fbar_initial]
+            kinetics_priors += [LogisticNormal(0.1, 5)]
         if options.weights:
             kinetics_initial += [w_initial, w_0_initial]
             kinetics_priors += [w_prior, w_0_prior]
@@ -359,7 +365,6 @@ class TranscriptionMixedSampler():
 
             return samples, is_accepted
 
-
         if profile:
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             logdir = '.\\logs\\reggae\\%s' % stamp
@@ -392,26 +397,29 @@ class TranscriptionMixedSampler():
     def sample_proteins(self, results, num_results):
         p_samples = list()
         for i in range(1, num_results+1):
-            p_samples.append(self.likelihood.calculate_protein(results.fbar[-i], results.k_fbar[-i], None)[0])
-        p_samples = np.array(p_samples)
+            p_samples.append(self.likelihood.calculate_protein(results.fbar[-i], results.k_fbar[-i], None))
+        return np.array(p_samples)
 
     def sample_latents(self, results, num_results):
         m_preds = list()
         for i in range(1, num_results):
             m_preds.append(self.predict_m_with_results(results, i))
         return np.array(m_preds)
+
     def results(self):
-        Δ = None
-        σ2_f = None
+        Δ = σ2_f = k_fbar = None
         σ2_m = self.samples[self.state_indices['σ2_m']]
         if self.options.preprocessing_variance:
             σ2_m = logit(σ2_m)
         else:
             σ2_f = self.samples[self.state_indices['σ2_f']]
 
-        kbar =   self.samples[self.state_indices['kinetics']][0].numpy()
-        k_fbar = self.samples[self.state_indices['kinetics']][1].numpy()
-        fbar =   self.samples[self.state_indices['latents']]
+        kbar = self.samples[self.state_indices['kinetics']][0].numpy()
+        fbar = self.samples[self.state_indices['latents']]
+        if self.options.tf_mrna_present:
+            k_fbar = self.samples[self.state_indices['kinetics']][1].numpy()
+            if k_fbar.ndim < 3:
+                k_fbar = np.expand_dims(k_fbar, 2)
         if not self.options.joint_latent:
             kernel_params = self.samples[self.state_indices['kernel_params']]
         else:
@@ -461,7 +469,8 @@ class TranscriptionMixedSampler():
 
     def predict_m_with_results(self, results, i=1):
         delay = results.Δ[-i] if self.options.delays else None
-        return self.likelihood.predict_m(results.kbar[-i], results.k_fbar[-i], results.wbar[-i], 
+        k_fbar = results.k_fbar[-i] if self.options.tf_mrna_present else None
+        return self.likelihood.predict_m(results.kbar[-i], k_fbar, results.wbar[-i], 
                                          results.fbar[-i], results.w_0bar[-i], delay)
 
     def predict_m_with_current(self):
