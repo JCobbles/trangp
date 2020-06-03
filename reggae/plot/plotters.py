@@ -230,7 +230,7 @@ class Plotter():
 
     def anim_latent(self, results, index=0, replicate=0):
         fig = plt.figure()
-        ax = plt.axes(xlim=(-1, 13), ylim=(-1, 13))
+        ax = plt.axes(xlim=(-1, 13), ylim=(-1, 5))
         line, = ax.plot([], [], lw=3)
         f_samples = results.f
         def init():

@@ -50,7 +50,7 @@ class MetropolisKernel(tfp.mcmc.TransitionKernel):
             ],
             default=lambda:self.step_size
         ))
-        tf.print('Updating step_size', self.step_size[0], 'due to acc rate', acc_rate, '\r', end='')
+        tf.print('Updating step_size', self.step_size[0], 'due to acc rate', acc_rate)
     
     def is_calibrated(self):
         return True

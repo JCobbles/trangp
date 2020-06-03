@@ -28,6 +28,10 @@ def get_time_square(times, N):
     t_2 = tf.reshape(tf.tile(times, [N]), [N, N])
     return t_1, t_2
 
+def add_diag(A, B):
+    C= A + tf.linalg.diag(tf.linalg.diag_part(B))
+    return C
+
 def logistic(x): # (inverse logit)
     return tfm.exp(x)/(1+tfm.exp(x))
 

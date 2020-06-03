@@ -35,6 +35,6 @@ def create_chains(model, args, sample_kwargs, num_chains=4, current_state=None):
 
 def run_job(args, sample_kwargs):
     with tf.device('/device:cpu:0'):
-        model = transcription_mh.TranscriptionMCMC(*args)
+        model = reggae.models.transcription_mh.TranscriptionMCMC(*args)
         model.sample(**sample_kwargs)
         return ChainResult(model.acceptance_rates, model.samples)
