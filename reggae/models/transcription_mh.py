@@ -164,12 +164,12 @@ class TranscriptionMCMC(MetropolisHastings):
         # Adaptable variances
         a = tf.constant(-0.5, dtype='float64')
         b2 = tf.constant(2., dtype='float64')
-        self.h_f = 0.35*tf.ones(self.N_p, dtype='float64')
+        self.h_f = 0.15*tf.ones(self.N_p, dtype='float64')
 
         # Interaction weights
-        w_0 = Parameter('w_0', tfd.Normal(0, 2), np.zeros(self.num_genes), step_size=0.5*tf.ones(self.num_genes, dtype='float64'))
+        w_0 = Parameter('w_0', tfd.Normal(0, 2), np.zeros(self.num_genes), step_size=0.2*tf.ones(self.num_genes, dtype='float64'))
         w_0.proposal_dist=lambda mu, j:tfd.Normal(mu, w_0.step_size[j])
-        w = Parameter('w', tfd.Normal(0, 2), 1*np.ones((self.num_genes, self.num_tfs)), step_size=0.5*tf.ones(self.num_genes, dtype='float64'))
+        w = Parameter('w', tfd.Normal(0, 2), 1*np.ones((self.num_genes, self.num_tfs)), step_size=0.2*tf.ones(self.num_genes, dtype='float64'))
         w.proposal_dist=lambda mu, j:tfd.Normal(mu, w.step_size[j]) #) w_j) # At the moment this is the same as w_j0 (see pg.8)
         # Latent function
         fbar = Parameter('fbar', self.fbar_prior, 0.5*np.ones((self.num_replicates, self.num_tfs, self.N_p)))
@@ -385,22 +385,23 @@ class TranscriptionMCMC(MetropolisHastings):
                 self.acceptance_rates['V'] += 1/self.num_tfs
                 self.acceptance_rates['L'] += 1/self.num_tfs
 
-    def save(self, name=''):
-        save_object({'samples':self.samples, 'acc_rates': self.acceptance_rates}, f'mh{name}')
+    def save(self, name):
+        save_object({'samples':self.samples, 'acc_rates': self.acceptance_rates}, f'mh-{name}')
 
     @staticmethod
-    def load(args, name=''):
+    def load(args, name):
         model = TranscriptionMCMC(*args)
 
         import os
         path = os.path.join(os.getcwd(), 'saved_models')
-        fs = [os.path.join(path, f) for f in os.listdir(path) if f.startswith(f'mh{name}')]
+        fs = [os.path.join(path, f) for f in os.listdir(path) if f.startswith(f'mh-{name}')]
         files = sorted(fs, key=os.path.getmtime)
         with open(files[-1], 'rb') as f:
             saved_model = pickle.load(f)
             model.samples = saved_model['samples']
             model.acceptance_rates = saved_model['acc_rates']            
         return model
+
     @staticmethod
     def initialise_from_state(args, state):
         model = TranscriptionMCMC(*args)
