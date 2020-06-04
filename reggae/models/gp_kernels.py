@@ -1,4 +1,4 @@
-from reggae.utilities import get_time_square
+from reggae.utilities import get_time_square, FixedDistribution
 
 import tensorflow as tf
 from tensorflow import math as tfm
@@ -10,6 +10,7 @@ f64 = np.float64
 class GPKernelSelector():
     def __init__(self, data, options):
         self.kernel = options.kernel
+        self.options = options
         self.τ = data.τ        
         self.N_p = data.τ.shape[0]
         self.num_tfs = data.f_obs.shape[1]
@@ -18,7 +19,7 @@ class GPKernelSelector():
         self.tt = t_1*t_2
         self.t2 = tf.square(t_1)
         self.tprime2 = tf.square(t_2)
-
+        self.fixed_dist = FixedDistribution(tf.ones(self.num_tfs, dtype='float64'))
         min_dist = min(data.t[1:]-data.t[:-1])
         min_dist = min(min_dist, 2)
         self._ranges = {
@@ -27,7 +28,7 @@ class GPKernelSelector():
             'mlp': [(f64(1), f64(10)), (f64(3.5), f64(20))],
         }
         self._priors = {
-            'rbf': [tfd.Uniform(f64(2), f64(10)), tfd.InverseGamma(f64(0.01), f64(0.01))],
+            'rbf': [tfd.Uniform(f64(2), f64(10)), tfd.Uniform(f64(f64(min_dist**2)-1), f64(7))],
             'mlp': [tfd.Uniform(f64(3.5), f64(10)), tfd.InverseGamma(f64(0.01), f64(0.01))],
         }
         self._proposals = {
@@ -47,7 +48,7 @@ class GPKernelSelector():
 
     def initial_params(self):
         if self.kernel == 'rbf':
-            return [2*tf.ones(self.num_tfs, dtype='float64'), 
+            return [1*tf.ones(self.num_tfs, dtype='float64'), 
                     4*tf.ones(self.num_tfs, dtype='float64')]
         elif self.kernel == 'mlp':
             return [0.8*tf.ones(self.num_tfs, dtype='float64'), 
@@ -62,6 +63,8 @@ class GPKernelSelector():
 
     def proposal(self, hyp_index, current_val):
         '''Returns kernel hyperparameter proposal dist centred on current val'''
+        if hyp_index == 0 and not self.options.tf_mrna_present:
+            return self.fixed_dist
         return self._proposals[self.kernel][hyp_index](current_val)
 
     def rbf(self, v, l2):

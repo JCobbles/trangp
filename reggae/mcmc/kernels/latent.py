@@ -4,7 +4,7 @@ from tensorflow_probability import distributions as tfd
 from reggae.mcmc.kernels.mh import MetropolisKernel
 from reggae.mcmc.kernels.wrappers import ESSWrapper
 from reggae.models import GPKernelSelector
-from reggae.utilities import jitter_cholesky, logit
+from reggae.utilities import jitter_cholesky, logit, add_diag
 from reggae.models.results import GenericResults
 
 import numpy as np
@@ -32,7 +32,7 @@ class LatentKernel(MetropolisKernel):
             self.step_fn = self.joint_one_step
             self.calc_prob_fn = self.joint_calc_prob
             
-        super().__init__(step_size, tune_every=50)
+        super().__init__(step_size, tune_every=5000)
 
     def _one_step(self, current_state, previous_kernel_results, all_states):
         return self.step_fn(current_state, previous_kernel_results, all_states)
@@ -76,7 +76,65 @@ class LatentKernel(MetropolisKernel):
                                 lambda:new_state, lambda:test_state)
         return new_state, prob, is_accepted[0]
 
+
     def joint_one_step(self, current_state, previous_kernel_results, all_states):
+        new_state = tf.identity(current_state[0])
+        new_params = []
+        S = tf.linalg.diag(self.step_size)
+        # MH
+        m, K = self.fbar_prior_params(current_state[1], current_state[2])
+        N_p = K.shape[-1]
+        K = K+tf.linalg.diag(1e-7*tf.ones(N_p, dtype='float64'))
+
+        # Propose new params
+        v = self.kernel_selector.proposal(0, current_state[1]).sample()
+        l2 = self.kernel_selector.proposal(1, current_state[2]).sample()
+        m_, K_ = self.fbar_prior_params(v, l2)
+        K_ = K_+tf.linalg.diag(1e-7*tf.ones(N_p, dtype='float64'))
+
+        # Gibbs step
+        fbar = new_state
+        for r in range(3):
+            fbar = new_state[r]
+            
+            iK = tf.linalg.inv(K)
+
+            U_invR = tf.linalg.cholesky(add_diag(iK, 1/S))
+            U_invR = tf.transpose(U_invR, [0, 2, 1])
+
+            gg = tfd.MultivariateNormalDiag(fbar, self.step_size).sample()
+
+            Sinv_g = gg / self.step_size
+            nu = tf.linalg.matvec(U_invR, fbar) - tf.squeeze(tf.linalg.solve(tf.transpose(U_invR, [0, 2, 1]), tf.expand_dims(Sinv_g, -1)), -1)
+
+            iK = tf.linalg.inv(K_)
+
+            U_invR = jitter_cholesky(add_diag(iK, 1/S))
+            U_invR = tf.transpose(U_invR, [0, 2, 1])
+            f = tf.linalg.solve(U_invR, tf.expand_dims(nu, -1)) + tf.linalg.cholesky_solve(tf.transpose(U_invR, [0, 2, 1]), tf.expand_dims(Sinv_g, -1))
+            f = tf.squeeze(f, -1)
+            mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
+
+            mask[r] = 1
+            new_state = (1-mask) * new_state + mask * f
+        new_hyp = [v, l2]
+        old_hyp = [current_state[1], current_state[2]]
+        new_prob = self.calc_prob_fn(new_state, new_hyp, old_hyp, all_states)
+        old_prob = self.calc_prob_fn(current_state[0], old_hyp, new_hyp, all_states) #previous_kernel_results.target_log_prob 
+
+        is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
+        
+        prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
+
+
+        new_state = tf.cond(tf.equal(is_accepted, tf.constant(False)),
+                            lambda:current_state[0], lambda:new_state)
+        new_params = tf.cond(tf.equal(is_accepted, tf.constant(False)),
+                                lambda:[current_state[1], current_state[2]], lambda:[v, l2])
+
+        return [new_state, *new_params], prob, is_accepted[0]
+
+    def _joint_one_step(self, current_state, previous_kernel_results, all_states):
         # Untransformed tf mRNA vectors F (Step 1)
         new_state = tf.identity(current_state[0])
         new_params = []
@@ -165,7 +223,8 @@ class LatentKernel(MetropolisKernel):
         return new_prob
 
     def bootstrap_results(self, init_state, all_states):
-        prob = self.calc_prob_fn(init_state[0], [init_state[1], init_state[2]], [init_state[1], init_state[2]], all_states)
+        prob = self.calc_prob_fn(init_state[0], [init_state[1], init_state[2]], 
+                                 [init_state[1], init_state[2]], all_states)
 
         return GenericResults(prob, True)
     
