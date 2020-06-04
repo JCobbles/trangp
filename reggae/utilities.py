@@ -140,3 +140,13 @@ def save_object(obj, filename):
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     with open(f'saved_models/{filename}-{stamp}.pkl', 'wb') as output:
         pickle.dump(obj, output, pickle.HIGHEST_PROTOCOL)
+
+class FixedDistribution():
+    def __init__(self, fixed_value):
+        self.fixed_value = fixed_value
+    
+    def sample(self):
+        return self.fixed_value
+    
+    def log_prob(self, x):
+        return 0

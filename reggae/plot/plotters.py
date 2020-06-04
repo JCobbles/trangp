@@ -19,6 +19,7 @@ class PlotOptions:
     for_report:     bool = True
     ylabel:         str = ''
     protein_present:bool = True
+    model_label:    str = 'Model'
     kernel_names:   list = field(default_factory=lambda:['Param 1', 'Param 2']) 
 
 
@@ -35,7 +36,7 @@ class Plotter():
         self.t = data.t
         self.common_ind = data.common_indices.numpy()
 
-    def plot_kinetics(self, k, k_f, true_k=None, true_k_f=None):
+    def plot_kinetics(self, k, k_f, true_k=None, true_k_f=None, true_hpds=None):
         k_latest = np.mean(k[-self.opt.num_kinetic_avg:], axis=0)
         num_genes = k.shape[1]
         plot_labels = ['Initial Conditions', 'Basal rates', 'Decay rates', 'Sensitivities']
@@ -49,15 +50,18 @@ class Plotter():
         if k_latest.shape[1] < 4:
             plot_labels = plot_labels[1:]
 
-        self.plot_bar_hpd(k, k_latest, self.opt.gene_names, true_var=true_k, width=0.2, rotation=60)
+        hpds = self.plot_bar_hpd(k, k_latest, self.opt.gene_names, true_var=true_k, width=0.2, 
+                                 rotation=60, true_hpds=true_hpds)
         plt.tight_layout(h_pad=2.0)
 
         if self.opt.protein_present:
-            k_latest = np.mean(k_f[-self.opt.num_kinetic_avg:], axis=0)
+            k_f_latest = np.mean(k_f[-self.opt.num_kinetic_avg:], axis=0)
             plt.figure(figsize=(10, 6))
-            self.plot_bar_hpd(k_f, k_latest, self.opt.tf_names, true_var=true_k_f)
-    
-    def plot_bar_hpd(self, var_samples, var, labels, true_var=None, width=0.1, titles=None, rotation=0):
+            self.plot_bar_hpd(k_f, k_f_latest, self.opt.tf_names, true_var=true_k_f)
+        return k_latest, hpds
+
+    def plot_bar_hpd(self, var_samples, var, labels, true_var=None, width=0.1, titles=None, 
+                     rotation=0, true_hpds=None):
         hpds = list()
         num = var.shape[0]
         plotnum = var.shape[1]*100 + 21
@@ -68,7 +72,7 @@ class Plotter():
         for k in range(var_samples.shape[2]):
             plt.subplot(plotnum)
             plotnum+=1
-            plt.bar(np.arange(num)-width, var[:, k], width=2*width, tick_label=labels, label='Model')
+            plt.bar(np.arange(num)-width, var[:, k], width=2*width, tick_label=labels, label=self.opt.model_label)
             plt.errorbar(np.arange(num)-width, var[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
             plt.xlim(-1, num)
             plt.xticks(rotation=rotation)
@@ -76,8 +80,11 @@ class Plotter():
                 plt.title(titles[k])
             if true_var is not None:
                 plt.bar(np.arange(num)+width, true_var[:, k], width=2*width, color='blue', align='center', label=self.opt.true_label)
+                if true_hpds is not None:
+                    plt.errorbar(np.arange(num)+width, true_var[:, k], true_hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
                 plt.legend()
         plt.tight_layout()
+        return hpds
 
     def plot_kinetics_convergence(self, k, k_f):
         num_genes = k.shape[1]
@@ -105,7 +112,7 @@ class Plotter():
         plt.tight_layout()
 
     def plot_samples(self, samples, titles, num_samples, color='grey', scatters=None, 
-                     scatter_args={}, legend=True, margined=False):
+                     scatter_args={}, legend=True, margined=False, sample_gap=2):
         num_components = samples[0].shape[0]
         subplot_shape = ((num_components+2)//3, 3)
         if self.opt.for_report:
@@ -119,7 +126,7 @@ class Plotter():
                 plt.scatter(self.τ[self.common_ind], scatters[j], marker='x', label='Observed', **scatter_args)
             # plt.errorbar([n*10+n for n in range(7)], Y[j], 2*np.sqrt(Y_var[j]), fmt='none', capsize=5)
 
-            for s in range(1, num_samples):
+            for s in range(1, sample_gap*num_samples, sample_gap):
                 kwargs = {}
                 if s == 1:
                     kwargs = {'label':'Samples'}
@@ -135,6 +142,8 @@ class Plotter():
             ax.set_xticklabels(self.t)
             if margined:
                 plt.ylim(min(samples[-1, j])-2, max(samples[-1, j]) + 2)
+            if self.opt.for_report:
+                plt.ylim(-0.2, 4.2)
             plt.xlabel('Time (h)')
             if legend:
                 plt.legend()
@@ -150,15 +159,18 @@ class Plotter():
         self.plot_samples(m_preds, self.opt.gene_names, self.opt.num_plot_genes, 
                           scatters=self.data.m_obs[replicate], legend=not self.opt.for_report)
 
-    def plot_tfs(self, f_samples, replicate=0, scale_observed=False, plot_barenco=False):
+    def plot_tfs(self, f_samples, replicate=0, scale_observed=False, plot_barenco=False, sample_gap=2):
         f_samples = f_samples[:, replicate]
         num_tfs = self.data.f_obs.shape[1]
         width = 8 if num_tfs > 1 else 6
-        plt.figure(figsize=(width, 4*np.ceil(num_tfs/3)))
+        figsize=(width, 4*np.ceil(num_tfs/3))
+        if self.opt.for_report and num_tfs == 1:
+            figsize=(6, 4)
+        plt.figure(figsize=figsize)
         scatter_args = {'s': 60, 'linewidth': 2, 'color': 'tab:blue'}
         self.plot_samples(f_samples, self.opt.tf_names, self.opt.num_plot_tfs, 
                           scatters=self.data.f_obs[replicate] if self.opt.tf_present else None,
-                          color='cadetblue', scatter_args=scatter_args, margined=True)
+                          scatter_args=scatter_args, margined=True, sample_gap=sample_gap)
         
         # if 'σ2_f' in model.params._fields:
         #     σ2_f = model.params.σ2_f.value
