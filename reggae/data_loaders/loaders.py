@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn import preprocessing
 
+
 class DataHolder(object):
     def __init__(self, data, noise, time):
         self.m_obs, self.f_obs = data
@@ -33,14 +34,22 @@ def load_humanp53(target_genes):
 
     tfs = ['TP53']
     genes_df = df[df.index.isin(target_genes)][columns]
+    genes_df = genes_df.reindex(target_genes)
 
     # genes_df = genes_df.reindex(['TNFRSF10B', 'SESN1', 'CDKN1A', 'DDB2', 'BIK'])
 
     tfs_df = df[df.index.isin(tfs)][columns]
 
-    normalised = preprocessing.normalize(np.r_[genes_df.values,tfs_df.values])
-    genes = np.expand_dims(normalised[:-1], 0)
-    tfs = np.expand_dims(np.atleast_2d(normalised[-1]), 0)
+    # normalised = preprocessing.normalize(np.r_[genes_df.values,tfs_df.values])
+    m = genes_df.values
+    genes_norm = 1/m.shape[0] * np.linalg.norm(m, axis=1, ord=None) #l2 norm
+    genes = m / np.sqrt(genes_norm.reshape(-1, 1))
+    genes = np.expand_dims(genes, 0)
+
+    f = tfs_df.values
+    tfs_norm = 1/f.shape[0] * np.linalg.norm(f, axis=1, ord=None) #l2 norm
+    tfs = f / np.sqrt(tfs_norm.reshape(-1, 1))
+    tfs = np.expand_dims(tfs, 0)
 
     t = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
 
@@ -186,3 +195,4 @@ def barenco_params():
         (np.array([1.2, 1.6, 1.75, 3.2, 2.3])*0.8/3.2)[[0, 4, 2, 3, 1]],
         (np.array([3, 0.8, 0.7, 1.8, 0.7])/1.8)[[0, 4, 2, 3, 1]]
     ]).T
+

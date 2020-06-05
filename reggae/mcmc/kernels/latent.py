@@ -211,6 +211,7 @@ class LatentKernel(MetropolisKernel):
                                        fstar
                                    )), lambda:f64(0))
         new_prob = tf.reduce_sum(new_m_likelihood) + new_f_likelihood
+
         new_prob += tf.reduce_sum(
             self.kernel_priors[0].log_prob(new_hyp[0]) + \
             self.kernel_priors[1].log_prob(new_hyp[1])
@@ -245,7 +246,6 @@ class ESSBuilder:
             m, K = self.kernel_selector()(logit(p1), logit(p2))
             m = tf.zeros((self.num_replicates, self.num_tfs, self.N_p), dtype='float64')
             K = tf.stack([K for _ in range(3)], axis=0)
-            # tf.print(p1, p2, K, m.shape)
             jitter = tf.linalg.diag(1e-8 *tf.ones(self.N_p, dtype='float64'))
             z = tfd.MultivariateNormalTriL(loc=m, 
                                 scale_tril=tf.linalg.cholesky(K+jitter)).sample(seed=seed)

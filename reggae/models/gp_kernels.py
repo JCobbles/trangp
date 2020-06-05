@@ -48,7 +48,7 @@ class GPKernelSelector():
 
     def initial_params(self):
         if self.kernel == 'rbf':
-            return [1*tf.ones(self.num_tfs, dtype='float64'), 
+            return [1.5*tf.ones(self.num_tfs, dtype='float64'), 
                     4*tf.ones(self.num_tfs, dtype='float64')]
         elif self.kernel == 'mlp':
             return [0.8*tf.ones(self.num_tfs, dtype='float64'), 
