@@ -70,7 +70,7 @@ class TranscriptionLikelihood():
         N_p = self.data.τ.shape[0]
 
         p_i = inverse_positivity(fbar)
-        if self.options.tf_mrna_present:
+        if self.options.translation:
             p_i = self.calculate_protein(fbar, k_fbar, Δ)
 
         # Calculate m_pred
@@ -91,15 +91,18 @@ class TranscriptionLikelihood():
     def get_parameters_from_state(self, all_states, state_indices,
                                   fbar=None, k_fbar=None, kbar=None, 
                                   wbar=None, w_0bar=None, σ2_m=None, Δ=None):
-        kbar = all_states[state_indices['kinetics']][0] if kbar is None else kbar
+        nuts_index = 0
+        kbar = all_states[state_indices['kinetics']][nuts_index] if kbar is None else kbar
         k_fbar = None
-        if self.options.tf_mrna_present:
-            k_fbar = all_states[state_indices['kinetics']][1] if k_fbar is None else k_fbar
+        if self.options.translation:
+            nuts_index+=1
+            k_fbar = all_states[state_indices['kinetics']][nuts_index] if k_fbar is None else k_fbar
         wbar = logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64'))
         w_0bar = 0.5*tf.ones(self.num_genes, dtype='float64')
         if self.options.weights:
-            wbar = all_states[state_indices['kinetics']][2] if wbar is None else wbar
-            w_0bar = all_states[state_indices['kinetics']][3] if w_0bar is None else w_0bar
+            nuts_index+=1
+            wbar = all_states[state_indices['kinetics']][nuts_index] if wbar is None else wbar
+            w_0bar = all_states[state_indices['kinetics']][nuts_index+1] if w_0bar is None else w_0bar
         σ2_m = all_states[state_indices['σ2_m']] if σ2_m is None else σ2_m
 
         if fbar is None:
@@ -284,7 +287,7 @@ class TranscriptionMixedSampler():
 
         kinetics_initial = [kbar_initial]
         kinetics_priors = [LogisticNormal(0.01, 5)]
-        if options.tf_mrna_present:
+        if options.translation:
             kinetics_initial += [k_fbar_initial]
             kinetics_priors += [LogisticNormal(0.1, 5)]
         if options.weights:
@@ -416,7 +419,7 @@ class TranscriptionMixedSampler():
 
         kbar = self.samples[self.state_indices['kinetics']][0].numpy()
         fbar = self.samples[self.state_indices['latents']]
-        if self.options.tf_mrna_present:
+        if self.options.translation:
             k_fbar = self.samples[self.state_indices['kinetics']][1].numpy()
             if k_fbar.ndim < 3:
                 k_fbar = np.expand_dims(k_fbar, 2)
@@ -469,7 +472,7 @@ class TranscriptionMixedSampler():
 
     def predict_m_with_results(self, results, i=1):
         delay = results.Δ[-i] if self.options.delays else None
-        k_fbar = results.k_fbar[-i] if self.options.tf_mrna_present else None
+        k_fbar = results.k_fbar[-i] if self.options.translation else None
         return self.likelihood.predict_m(results.kbar[-i], k_fbar, results.wbar[-i], 
                                          results.fbar[-i], results.w_0bar[-i], delay)
 
