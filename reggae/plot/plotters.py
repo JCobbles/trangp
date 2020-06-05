@@ -1,10 +1,14 @@
 from matplotlib import pyplot as plt
 import numpy as np
 import arviz
-from reggae.data_loaders import scaled_barenco_data
-from reggae.models.results import SampleResults
 from dataclasses import dataclass, field
 from matplotlib.animation import FuncAnimation
+import networkx as nx
+import tensorflow as tf
+
+from reggae.data_loaders import scaled_barenco_data
+from reggae.models.results import SampleResults
+
 
 @dataclass
 class PlotOptions:
@@ -43,7 +47,7 @@ class Plotter():
 
 
         width = 18 if num_genes > 10 else 10
-        plt.figure(figsize=(width, 10))
+        plt.figure(figsize=(width, 13))
         if not self.opt.for_report:
             plt.suptitle('Transcription ODE Kinetic Parameters')
 
@@ -72,14 +76,14 @@ class Plotter():
         for k in range(var_samples.shape[2]):
             plt.subplot(plotnum)
             plotnum+=1
-            plt.bar(np.arange(num)-width, var[:, k], width=2*width, tick_label=labels, label=self.opt.model_label)
+            plt.bar(np.arange(num)-width, var[:, k], width=2*width, tick_label=labels, color='chocolate', label=self.opt.model_label)
             plt.errorbar(np.arange(num)-width, var[:, k], hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
             plt.xlim(-1, num)
             plt.xticks(rotation=rotation)
             if titles is not None:
                 plt.title(titles[k])
             if true_var is not None:
-                plt.bar(np.arange(num)+width, true_var[:, k], width=2*width, color='blue', align='center', label=self.opt.true_label)
+                plt.bar(np.arange(num)+width, true_var[:, k], width=2*width, color='slategrey', align='center', label=self.opt.true_label)
                 if true_hpds is not None:
                     plt.errorbar(np.arange(num)+width, true_var[:, k], true_hpds[:, k].swapaxes(0,1), fmt='none', capsize=5, color='black')
                 plt.legend()
@@ -143,7 +147,7 @@ class Plotter():
             if margined:
                 plt.ylim(min(samples[-1, j])-2, max(samples[-1, j]) + 2)
             if self.opt.for_report:
-                plt.ylim(-0.2, 4.2)
+                plt.ylim(-0.2, max(samples[-1, j]) + 0.2)
             plt.xlabel('Time (h)')
             if legend:
                 plt.legend()
@@ -229,6 +233,33 @@ class Plotter():
         anim = FuncAnimation(fig, animate, init_func=init,
                                     frames=f_samples.shape[0]//10, interval=50, blit=True)
         return anim.to_html5_video()
+
+    def plot_grn(self, w):
+        G = nx.Graph()
+        pos=nx.spring_layout(G, seed=42)
+        import random
+        random.seed(42)
+        np.random.seed(42)
+
+        min = tf.math.reduce_min(w).numpy()
+        diff = tf.math.reduce_max(w).numpy() - min
+        nodes = list()
+
+        for j in range(w.shape[0]):
+            nodes.append(self.opt.gene_names[j])
+        for i in range(w.shape[1]):
+            nodes.append(self.opt.tf_names[i])
+
+        edges = list()
+        colors = list()
+        for j in range(5):
+            for i in range(3):
+                edge = (self.opt.gene_names[j], self.opt.tf_names[i])
+                colors.append(f'{(w[j, i]-min) / diff}')
+                edges.append(edge)
+        G.add_edges_from(edges)
+
+        nx.draw(G, edge_color=colors, node_size=1000, with_labels=True)
 
     def summary(self, results: SampleResults, m_preds, true_k=None, true_k_f=None,
                 replicate=0, scale_observed=False):
