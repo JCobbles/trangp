@@ -96,20 +96,20 @@ class Plotter():
         height = (num_genes//2)*5
         plt.figure(figsize=(14, height))
         plt.suptitle('Convergence of ODE Kinetic Parameters')
-        self.plot_kinetics_convergence_group(k, labels, 'Gene')
+        self.plot_kinetics_convergence_group(k, labels, self.opt.gene_names)
         if self.opt.protein_present:
             width = 14 if k_f.shape[1] > 1 else 6
             plt.figure(figsize=(width, 4*np.ceil(k_f.shape[1]/2)))
             plt.suptitle('Translation Convergence')
             labels = ['a', 'δ']
-            self.plot_kinetics_convergence_group(k_f, labels, 'TF')
+            self.plot_kinetics_convergence_group(k_f, labels, self.opt.tf_names)
 
-    def plot_kinetics_convergence_group(self, k, labels, title_prefix):
+    def plot_kinetics_convergence_group(self, k, labels, names):
         num = k.shape[1]
         horizontal_subplots = min(2, num)
         for j in range(num):
             ax = plt.subplot(num, horizontal_subplots, j+1)
-            ax.set_title(f'{title_prefix} {j}')            
+            ax.set_title(names[j])            
             for v in range(k.shape[2]):
                 plt.plot(k[:, j, v], label=labels[v])
             plt.legend()
@@ -146,22 +146,26 @@ class Plotter():
             ax.set_xticklabels(self.t)
             if margined:
                 plt.ylim(min(samples[-1, j])-2, max(samples[-1, j]) + 2)
-            if self.opt.for_report:
-                plt.ylim(-0.2, max(samples[-1, j]) + 0.2)
+            # if self.opt.for_report:
+                # plt.ylim(-0.2, max(samples[-1, j]) + 0.2)
             plt.xlabel('Time (h)')
             if legend:
                 plt.legend()
         plt.tight_layout()
 
-    def plot_genes(self, m_preds, replicate=0, height_mul=3, width_mul=2):
+    def plot_genes(self, m_preds, replicate=0, height_mul=3, width_mul=2, indices=None):
         m_preds = m_preds[:, replicate]
+        scatters = self.data.m_obs[replicate]
+        if indices:
+            m_preds = m_preds[:, indices]
+            scatters = scatters[indices]
         height = np.ceil(m_preds.shape[1]/3)
         width = 4 if self.opt.for_report else 7
         plt.figure(figsize=(width*width_mul, height*height_mul))
         if not self.opt.for_report:
             plt.suptitle('Genes')
-        self.plot_samples(m_preds, self.opt.gene_names, self.opt.num_plot_genes, 
-                          scatters=self.data.m_obs[replicate], legend=not self.opt.for_report)
+        self.plot_samples(m_preds, self.opt.gene_names[[indices]], self.opt.num_plot_genes, 
+                          scatters=scatters, legend=not self.opt.for_report)
 
     def plot_tfs(self, f_samples, replicate=0, scale_observed=False, plot_barenco=False, sample_gap=2):
         f_samples = f_samples[:, replicate]
