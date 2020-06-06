@@ -6,7 +6,6 @@ from tensorflow_probability import distributions as tfd
 
 from reggae.mcmc import MetropolisHastings, Parameter
 from reggae.models import GPKernelSelector
-from reggae.data_loaders import DataHolder
 from reggae.utilities import exp, mult, jitter_cholesky, save_object
 from reggae.models.results import GenericResults
 import reggae
@@ -18,7 +17,7 @@ f64 = np.float64
 
 
 class TranscriptionLikelihood():
-    def __init__(self, data: DataHolder, options):
+    def __init__(self, data, options):
         self.options = options
         self.data = data
         self.num_tfs = data.f_obs.shape[1]
@@ -149,7 +148,7 @@ class TranscriptionMCMC(MetropolisHastings):
     Data is a tuple (m, f) of shapes (num, time)
     time is a tuple (t, τ, common_indices)
     '''
-    def __init__(self, data: DataHolder, options):
+    def __init__(self, data, options):
         self.data = data
         min_dist = min(data.t[1:]-data.t[:-1])
         self.N_p = data.τ.shape[0]
@@ -198,7 +197,7 @@ class TranscriptionMCMC(MetropolisHastings):
             kbar[kbar > 3] = 3
             return kbar
         num_var = 4 if self.options.initial_conditions else 3
-        kbar_initial = -0.1*np.ones((5, num_var), dtype='float64')
+        kbar_initial = -0.1*np.ones((self.num_genes, num_var), dtype='float64')
         for j, k in enumerate(kbar_initial):
             kbar_initial[j] = constrain_kbar(k, j)
         kbar = Parameter('kbar',
@@ -300,24 +299,25 @@ class TranscriptionMCMC(MetropolisHastings):
 
 
         # Interaction weights and biases (note: should work for self.num_tfs > 1) (Step 4)
-        w = params.w.value
-        w_0 = params.w_0.value
-        wstar = w.copy()
-        w_0star = w_0.copy()
-        for j in range(self.num_genes):
-            sample_0 = params.w_0.propose(w_0[j], j)
-            sample = params.w.propose(wstar[j], j)
-            wstar[j] = sample
-            w_0star[j] = sample_0
-            new_prob = self.likelihood.genes(params, w=wstar, w_0=w_0star)[j] + sum(params.w.prior.log_prob(sample)) + params.w_0.prior.log_prob(sample_0)
-            old_prob = old_m_likelihood[j] + sum(params.w.prior.log_prob(w[j,:])) + params.w_0.prior.log_prob(w_0[j])
-            if self.is_accepted(new_prob, old_prob):
-                params.w.value[j] = sample
-                params.w_0.value[j] = sample_0
-                self.acceptance_rates['w'] += 1/self.num_genes
-                self.acceptance_rates['w_0'] += 1/self.num_genes
-            else:
-                wstar[j] = params.w.value[j]
+        if self.options.weights:
+            w = params.w.value
+            w_0 = params.w_0.value
+            wstar = w.copy()
+            w_0star = w_0.copy()
+            for j in range(self.num_genes):
+                sample_0 = params.w_0.propose(w_0[j], j)
+                sample = params.w.propose(wstar[j], j)
+                wstar[j] = sample
+                w_0star[j] = sample_0
+                new_prob = self.likelihood.genes(params, w=wstar, w_0=w_0star)[j] + sum(params.w.prior.log_prob(sample)) + params.w_0.prior.log_prob(sample_0)
+                old_prob = old_m_likelihood[j] + sum(params.w.prior.log_prob(w[j,:])) + params.w_0.prior.log_prob(w_0[j])
+                if self.is_accepted(new_prob, old_prob):
+                    params.w.value[j] = sample
+                    params.w_0.value[j] = sample_0
+                    self.acceptance_rates['w'] += 1/self.num_genes
+                    self.acceptance_rates['w_0'] += 1/self.num_genes
+                else:
+                    wstar[j] = params.w.value[j]
 
         # Noise variances
         if self.options.preprocessing_variance:
