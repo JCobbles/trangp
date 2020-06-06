@@ -42,8 +42,9 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
                 if type(wrapped_state_i) is not list:
                     wrapped_state_i = [wrapped_state_i]
 
+                tgt_prob = self.kernels[i].target_log_prob_fn_fn(current_state)(*wrapped_state_i)
                 previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
-                    target_log_prob=self.kernels[i].target_log_prob_fn_fn(current_state)(*wrapped_state_i))
+                    target_log_prob=tgt_prob)
 
             args = []
             try:
@@ -62,11 +63,8 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
                 new_state.append([tf.identity(res) for res in result_state])
             else:
                 new_state.append(result_state)
-            # if i == 2:
-            #     tf.print(result_state[1][0])
 
             is_accepted.append(kernel_results.is_accepted)
-            # is_accepted.append(True)
             inner_results.append(kernel_results)
         
         return new_state, MixedKernelResults(inner_results, is_accepted, previous_kernel_results.iteration+1)

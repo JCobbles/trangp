@@ -42,8 +42,8 @@ class MetropolisKernel(tfp.mcmc.TransitionKernel):
     def tune(self, acc_rate):
         self.step_size.assign(tf.case([
                 (acc_rate < 0.01, lambda: self.step_size * 0.1),
-                (acc_rate < 0.05, lambda: self.step_size * 0.5),
-                (acc_rate < 0.2, lambda: self.step_size * 0.9),
+                (acc_rate < 0.1, lambda: self.step_size * 0.5),
+                (acc_rate < 0.3, lambda: self.step_size * 0.9),
                 (acc_rate > 0.95, lambda: self.step_size * 10.0),
                 (acc_rate > 0.75, lambda: self.step_size * 2.0),
                 (acc_rate > 0.5, lambda: self.step_size * 1.1),

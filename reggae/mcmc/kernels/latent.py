@@ -32,7 +32,7 @@ class LatentKernel(MetropolisKernel):
             self.step_fn = self.joint_one_step
             self.calc_prob_fn = self.joint_calc_prob
             
-        super().__init__(step_size, tune_every=5000)
+        super().__init__(step_size, tune_every=10)
 
     def _one_step(self, current_state, previous_kernel_results, all_states):
         return self.step_fn(current_state, previous_kernel_results, all_states)
@@ -91,37 +91,41 @@ class LatentKernel(MetropolisKernel):
         l2 = self.kernel_selector.proposal(1, current_state[2]).sample()
         m_, K_ = self.fbar_prior_params(v, l2)
         K_ = K_+tf.linalg.diag(1e-7*tf.ones(N_p, dtype='float64'))
+        iK = tf.linalg.inv(K)
+        iK_ = tf.linalg.inv(K_)
+        U_invR = tf.linalg.cholesky(add_diag(iK, 1/S))
+        U_invR = tf.transpose(U_invR, [0, 2, 1])
+        U_invR_ = jitter_cholesky(add_diag(iK_, 1/S))
+        U_invR_ = tf.transpose(U_invR_, [0, 2, 1])
 
         # Gibbs step
         fbar = new_state
-        for r in range(3):
+        for r in range(self.num_replicates):
             fbar = new_state[r]
-            
-            iK = tf.linalg.inv(K)
-
-            U_invR = tf.linalg.cholesky(add_diag(iK, 1/S))
-            U_invR = tf.transpose(U_invR, [0, 2, 1])
 
             gg = tfd.MultivariateNormalDiag(fbar, self.step_size).sample()
 
             Sinv_g = gg / self.step_size
+
+            # f = tf.zeros((self.num_tfs, 1), dtype='float64')
             nu = tf.linalg.matvec(U_invR, fbar) - tf.squeeze(tf.linalg.solve(tf.transpose(U_invR, [0, 2, 1]), tf.expand_dims(Sinv_g, -1)), -1)
-
-            iK = tf.linalg.inv(K_)
-
-            U_invR = jitter_cholesky(add_diag(iK, 1/S))
-            U_invR = tf.transpose(U_invR, [0, 2, 1])
-            f = tf.linalg.solve(U_invR, tf.expand_dims(nu, -1)) + tf.linalg.cholesky_solve(tf.transpose(U_invR, [0, 2, 1]), tf.expand_dims(Sinv_g, -1))
+            f = tf.linalg.solve(U_invR_, tf.expand_dims(nu, -1)) + tf.linalg.cholesky_solve(tf.transpose(U_invR_, [0, 2, 1]), tf.expand_dims(Sinv_g, -1))
             f = tf.squeeze(f, -1)
-            mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
+                # mask = np.zeros((self.num_tfs, 1), dtype='float64')
+                # mask[i] = 1
+                # f = (1-mask) * f + mask * f_i
 
+            mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
             mask[r] = 1
             new_state = (1-mask) * new_state + mask * f
+            
         new_hyp = [v, l2]
         old_hyp = [current_state[1], current_state[2]]
         new_prob = self.calc_prob_fn(new_state, new_hyp, old_hyp, all_states)
         old_prob = self.calc_prob_fn(current_state[0], old_hyp, new_hyp, all_states) #previous_kernel_results.target_log_prob 
-
+        # tf.print(new_prob, old_prob, new_hyp, old_hyp)
+        # from matplotlib import pyplot as plt
+        # plt.plot(new_state[0,0])
         is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
         
         prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
@@ -170,7 +174,7 @@ class LatentKernel(MetropolisKernel):
         old_prob = self.calc_prob_fn(new_state, old_hyp, new_hyp, all_states) #previous_kernel_results.target_log_prob 
 
         is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
-        
+
         prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
 
 
@@ -220,7 +224,6 @@ class LatentKernel(MetropolisKernel):
             self.kernel_selector.proposal(0, new_hyp[0]).log_prob(old_hyp[0]) + \
             self.kernel_selector.proposal(1, new_hyp[1]).log_prob(old_hyp[1])
         )
-
         return new_prob
 
     def bootstrap_results(self, init_state, all_states):
