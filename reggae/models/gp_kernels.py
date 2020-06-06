@@ -21,14 +21,14 @@ class GPKernelSelector():
         self.tprime2 = tf.square(t_2)
         self.fixed_dist = FixedDistribution(tf.ones(self.num_tfs, dtype='float64'))
         min_dist = min(data.t[1:]-data.t[:-1])
-        min_dist = min(min_dist, 2)
+        min_dist = max(min_dist, 1.5)
         self._ranges = {
             'rbf': [(f64(1e-4), f64(5)), #1+max(np.var(data.f_obs, axis=2))
                     (f64(min_dist**2)-1.2, f64(data.t[-1]**2))],
             'mlp': [(f64(1), f64(10)), (f64(3.5), f64(20))],
         }
         self._priors = {
-            'rbf': [tfd.Uniform(f64(2), f64(10)), tfd.Uniform(f64(f64(min_dist**2)-1), f64(7))],
+            'rbf': [tfd.Uniform(f64(1), f64(10)), tfd.Uniform(f64(min_dist**2), f64(7))],
             'mlp': [tfd.Uniform(f64(3.5), f64(10)), tfd.InverseGamma(f64(0.01), f64(0.01))],
         }
         self._proposals = {
@@ -63,7 +63,7 @@ class GPKernelSelector():
 
     def proposal(self, hyp_index, current_val):
         '''Returns kernel hyperparameter proposal dist centred on current val'''
-        if hyp_index == 0 and not self.options.tf_mrna_present:
+        if hyp_index == 0 and not self.options.translation:
             return self.fixed_dist
         return self._proposals[self.kernel][hyp_index](current_val)
 
