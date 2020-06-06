@@ -59,7 +59,7 @@ class TranscriptionLikelihood():
     @tf.function
     def predict_m(self, kbar, k_fbar, wbar, fbar, w_0bar, Δ):
         # Take relevant parameters out of log-space
-        kin = (tf.reshape(logit(kbar[:, i]), (-1, 1)) for i in range(kbar.shape[1]))
+        kin = (tf.reshape(tf.exp(logit(kbar[:, i])), (-1, 1)) for i in range(kbar.shape[1]))
         if self.options.initial_conditions:
             a_j, b_j, d_j, s_j = kin
         else:
@@ -247,49 +247,56 @@ class TranscriptionMixedSampler():
 
         
         # Kinetic parameters & Interaction weights
-        w_prior = LogisticNormal(f64(-1.1), f64(1.1))
+        w_prior = LogisticNormal(f64(-2), f64(2))
         w_initial = logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64'))
         w_0_prior = LogisticNormal(f64(-1), f64(1))
         w_0_initial = 0.5*tf.ones(self.num_genes, dtype='float64')
 
         num_kin = 4 if self.options.initial_conditions else 3
-        kbar_initial = 0.6*tf.ones((self.num_genes, num_kin), dtype='float64')
+        kbar_initial = 0.8*tf.ones((self.num_genes, num_kin), dtype='float64')
 
         def kbar_log_prob(all_states):
             def kbar_log_prob_fn(*args): #kbar, k_fbar, wbar, w_0bar
-                kbar = args[0]
+                index = 0
+                kbar = args[index]
                 new_prob = 0
-                k_m = logit(kbar)
+                k_m = tf.exp(logit(kbar))
+                # tf.print(k_m)
                 lik_args = {'kbar': kbar}
-                new_prob += tf.reduce_sum(self.params.kinetics.prior[0].log_prob(k_m))
-                if options.tf_mrna_present:
-                    k_fbar = args[1]
+                new_prob += tf.reduce_sum(self.params.kinetics.prior[index].log_prob(k_m))
+                # tf.print('kbar', new_prob)
+                if options.translation:
+                    index += 1
+                    k_fbar = args[index]
                     lik_args['k_fbar'] = k_fbar
-                    new_prob += tf.reduce_sum(self.params.kinetics.prior[1].log_prob(logit(k_fbar)))
+                    kfprob = tf.reduce_sum(self.params.kinetics.prior[index].log_prob(logit(k_fbar)))
+                    # tf.print('k_f_', kfprob)
+                    new_prob += kfprob
                 if options.weights:
-                    wbar, w_0bar = args[2], args[3]
+                    index+= 1
+                    wbar, w_0bar = args[index], args[index+1]
                     lik_args['wbar'] = wbar
                     lik_args['w_0bar'] = w_0bar
-                    new_prob += tf.reduce_sum(self.params.kinetics.prior[2].log_prob(logit(wbar))) 
-                    new_prob += tf.reduce_sum(self.params.kinetics.prior[3].log_prob(logit(w_0bar)))
-
+                    new_prob += tf.reduce_sum(self.params.kinetics.prior[index].log_prob(logit(wbar))) 
+                    new_prob += tf.reduce_sum(self.params.kinetics.prior[index+1].log_prob(logit(w_0bar)))
+                
                 new_prob += tf.reduce_sum(self.likelihood.genes(
                     all_states=all_states,
                     state_indices=self.state_indices,
                     **lik_args
                 ))
-                
+                # tf.print('end_prob', new_prob)
                 return tf.reduce_sum(new_prob)
             return kbar_log_prob_fn
 
 
-        k_fbar_initial = 0.7*tf.ones((self.num_tfs,), dtype='float64')
+        k_fbar_initial = 0.6*tf.ones((self.num_tfs,), dtype='float64')
 
         kinetics_initial = [kbar_initial]
-        kinetics_priors = [LogisticNormal(0.01, 5)]
+        kinetics_priors = [LogisticNormal(0.01, 100)]
         if options.translation:
             kinetics_initial += [k_fbar_initial]
-            kinetics_priors += [LogisticNormal(0.1, 5)]
+            kinetics_priors += [LogisticNormal(0.1, 7)]
         if options.weights:
             kinetics_initial += [w_initial, w_0_initial]
             kinetics_priors += [w_prior, w_0_prior]

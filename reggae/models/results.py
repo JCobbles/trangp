@@ -36,7 +36,7 @@ class SampleResults:
         return inverse_positivity(self.fbar).numpy()
     @property
     def k(self):
-        return logit(self.kbar).numpy()
+        return np.exp(logit(self.kbar).numpy())
     @property
     def k_f(self):
         if self.k_fbar is None:
