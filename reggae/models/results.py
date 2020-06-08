@@ -21,6 +21,7 @@ MixedKernelResults = collections.namedtuple('MixedKernelResults', [
 
 @dataclass
 class SampleResults:
+    options: object
     fbar: object
     kbar: object
     k_fbar: object
@@ -30,13 +31,15 @@ class SampleResults:
     w_0bar: object
     σ2_m: object
     σ2_f: object = None
-
     @property
     def f(self):
         return inverse_positivity(self.fbar).numpy()
     @property
     def k(self):
-        return np.exp(logit(self.kbar).numpy())
+        ret = logit(self.kbar).numpy()
+        if self.options.kinetic_exponential:
+            return np.exp(ret)
+        return ret
     @property
     def k_f(self):
         if self.k_fbar is None:

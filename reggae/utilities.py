@@ -149,4 +149,4 @@ class FixedDistribution():
         return self.fixed_value
     
     def log_prob(self, x):
-        return 0
+        return tf.constant(0, dtype='float64')

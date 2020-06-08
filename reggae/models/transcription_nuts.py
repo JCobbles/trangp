@@ -59,7 +59,10 @@ class TranscriptionLikelihood():
     @tf.function
     def predict_m(self, kbar, k_fbar, wbar, fbar, w_0bar, Δ):
         # Take relevant parameters out of log-space
-        kin = (tf.reshape(tf.exp(logit(kbar[:, i])), (-1, 1)) for i in range(kbar.shape[1]))
+        if self.options.kinetic_exponential:
+            kin = (tf.reshape(tf.exp(logit(kbar[:, i])), (-1, 1)) for i in range(kbar.shape[1]))
+        else:
+            kin = (tf.reshape(logit(kbar[:, i]), (-1, 1)) for i in range(kbar.shape[1]))
         if self.options.initial_conditions:
             a_j, b_j, d_j, s_j = kin
         else:
@@ -260,7 +263,9 @@ class TranscriptionMixedSampler():
                 index = 0
                 kbar = args[index]
                 new_prob = 0
-                k_m = tf.exp(logit(kbar))
+                k_m =logit(kbar)
+                if self.options.kinetic_exponential:
+                    k_m = tf.exp(k_m)
                 # tf.print(k_m)
                 lik_args = {'kbar': kbar}
                 new_prob += tf.reduce_sum(self.params.kinetics.prior[index].log_prob(k_m))
@@ -290,7 +295,7 @@ class TranscriptionMixedSampler():
             return kbar_log_prob_fn
 
 
-        k_fbar_initial = 0.6*tf.ones((self.num_tfs,), dtype='float64')
+        k_fbar_initial = 0.8*tf.ones((self.num_tfs,), dtype='float64')
 
         kinetics_initial = [kbar_initial]
         kinetics_priors = [LogisticNormal(0.01, 100)]
@@ -442,7 +447,7 @@ class TranscriptionMixedSampler():
             w_0bar =    self.samples[self.state_indices['kinetics']][3]
         if self.options.delays:
             Δ =  self.samples[self.state_indices['Δ']]
-        return SampleResults(fbar, kbar, k_fbar, Δ, kernel_params, wbar, w_0bar, σ2_m, σ2_f)
+        return SampleResults(self.options, fbar, kbar, k_fbar, Δ, kernel_params, wbar, w_0bar, σ2_m, σ2_f)
 
     def save(self, name):
         save_object({'samples': self.samples, 'is_accepted': self.is_accepted}, f'custom-{name}')

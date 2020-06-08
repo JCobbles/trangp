@@ -31,7 +31,7 @@ class Plotter():
     def __init__(self, data, options: PlotOptions):
         self.opt = options
         if self.opt.gene_names is None:
-            self.opt.gene_names = np.arange(data.m_obs.shape[1])
+            self.opt.gene_names = np.array([f'Gene {j}' for j in range(data.m_obs.shape[1])])
         if self.opt.tf_names is None:
             self.opt.tf_names = [f'TF {i}' for i in range(data.f_obs.shape[1])]
 
@@ -164,13 +164,14 @@ class Plotter():
         plt.figure(figsize=(width*width_mul, height*height_mul))
         if not self.opt.for_report:
             plt.suptitle('Genes')
-        self.plot_samples(m_preds, self.opt.gene_names[[indices]], self.opt.num_plot_genes, 
+        names = self.opt.gene_names[[indices]] if indices is not None else self.opt.gene_names
+        self.plot_samples(m_preds, names, self.opt.num_plot_genes, 
                           scatters=scatters, legend=not self.opt.for_report)
 
     def plot_tfs(self, f_samples, replicate=0, scale_observed=False, plot_barenco=False, sample_gap=2):
         f_samples = f_samples[:, replicate]
         num_tfs = self.data.f_obs.shape[1]
-        width = 8 if num_tfs > 1 else 6
+        width = 6*min(num_tfs, 3)
         figsize=(width, 4*np.ceil(num_tfs/3))
         if self.opt.for_report and num_tfs == 1:
             figsize=(6, 4)
@@ -197,11 +198,18 @@ class Plotter():
 
         plt.tight_layout()
 
+    def moving_average(self, a, n=3) :
+        ret = np.cumsum(a, dtype=float)
+        ret[n:] = ret[n:] - ret[:-n]
+        return ret[n - 1:] / n
+
     def plot_noises(self, σ2_m_samples, σ2_f_samples):
         plt.figure(figsize=(5, 3))
         for j in range(self.opt.gene_names.shape[0]):
-            plt.plot(σ2_m_samples[:, j], label=self.opt.gene_names[j])
-        plt.legend()
+            ma = self.moving_average(σ2_m_samples[-1000:, j], n=20)
+            plt.plot(ma, label=self.opt.gene_names[j])
+        if self.opt.gene_names.shape[0] < 8:
+            plt.legend()
         if σ2_f_samples is not None:
             plt.figure(figsize=(5, 3))
             for j in range(σ2_f_samples.shape[1]):
@@ -214,7 +222,8 @@ class Plotter():
         w_0 = weights[1]
         for j in range(self.opt.gene_names.shape[0]):
             plt.plot(w[:, j], label=self.opt.gene_names[j])
-        plt.legend()
+        if self.opt.gene_names.shape[0] < 8:
+            plt.legend()
         plt.title('Interaction weights')
         plt.figure()
         for j in range(self.opt.gene_names.shape[0]):
@@ -223,7 +232,7 @@ class Plotter():
 
     def anim_latent(self, results, index=0, replicate=0):
         fig = plt.figure()
-        ax = plt.axes(xlim=(-1, 13), ylim=(-1, 5))
+        ax = plt.axes(xlim=(-1, 13), ylim=(-1, 4))
         line, = ax.plot([], [], lw=3)
         f_samples = results.f
         def init():

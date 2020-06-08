@@ -11,3 +11,4 @@ class Options:
     weights:                bool = True  # True if weights used
     initial_conditions:     bool = True  # True if initial conditions for gene mRNA used
     translation:            bool = True  # True if the translation mechanism is active
+    kinetic_exponential:    bool = False # True if kinetic params are exponentiated
