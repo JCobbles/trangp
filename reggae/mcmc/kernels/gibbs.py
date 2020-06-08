@@ -16,6 +16,7 @@ class GibbsKernel(tfp.mcmc.TransitionKernel):
         self.sq_diff_fn = sq_diff_fn
         self.N_p = data.τ.shape[0]
 
+    @tf.function
     def one_step(self, current_state, previous_kernel_results, all_states):
         # Prior parameters
         α = self.prior.concentration

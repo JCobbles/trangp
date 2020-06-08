@@ -32,7 +32,7 @@ class LatentKernel(MetropolisKernel):
             self.step_fn = self.joint_one_step
             self.calc_prob_fn = self.joint_calc_prob
             
-        super().__init__(step_size, tune_every=10)
+        super().__init__(step_size, tune_every=100)
 
     def _one_step(self, current_state, previous_kernel_results, all_states):
         return self.step_fn(current_state, previous_kernel_results, all_states)
@@ -77,6 +77,7 @@ class LatentKernel(MetropolisKernel):
         return new_state, prob, is_accepted[0]
 
 
+    @tf.function
     def joint_one_step(self, current_state, previous_kernel_results, all_states):
         new_state = tf.identity(current_state[0])
         new_params = []
@@ -97,6 +98,8 @@ class LatentKernel(MetropolisKernel):
         U_invR = tf.transpose(U_invR, [0, 2, 1])
         U_invR_ = jitter_cholesky(add_diag(iK_, 1/S))
         U_invR_ = tf.transpose(U_invR_, [0, 2, 1])
+        new_hyp = [v, l2]
+        old_hyp = [current_state[1], current_state[2]]
 
         # Gibbs step
         fbar = new_state
@@ -118,25 +121,30 @@ class LatentKernel(MetropolisKernel):
             mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
             mask[r] = 1
             new_state = (1-mask) * new_state + mask * f
-            
-        new_hyp = [v, l2]
-        old_hyp = [current_state[1], current_state[2]]
-        new_prob = self.calc_prob_fn(new_state, new_hyp, old_hyp, all_states)
-        old_prob = self.calc_prob_fn(current_state[0], old_hyp, new_hyp, all_states) #previous_kernel_results.target_log_prob 
-        # tf.print(new_prob, old_prob, new_hyp, old_hyp)
-        # from matplotlib import pyplot as plt
-        # plt.plot(new_state[0,0])
-        is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
         
-        prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
+        test_state = tf.zeros((self.num_replicates, self.num_tfs, N_p), dtype='float64')
 
+        for i in range(self.num_tfs): # Test each tf individually
+            mask = np.zeros((self.num_replicates, self.num_tfs, 1), dtype='float64')
+            hyp_mask = np.zeros((self.num_tfs,), dtype='float64')
+            hyp_mask[i] = 1
+            mask[:, i] = 1
+            test_state = (1-mask) * current_state[0] + mask * new_state
 
-        new_state = tf.cond(tf.equal(is_accepted, tf.constant(False)),
-                            lambda:current_state[0], lambda:new_state)
-        new_params = tf.cond(tf.equal(is_accepted, tf.constant(False)),
-                                lambda:[current_state[1], current_state[2]], lambda:[v, l2])
+            new_prob = self.calc_prob_fn(test_state, new_hyp, old_hyp, all_states)
+            old_prob = self.calc_prob_fn(current_state[0], old_hyp, new_hyp, all_states) #previous_kernel_results.target_log_prob 
+            is_accepted = self.metropolis_is_accepted(new_prob, old_prob)
+            if not is_accepted[0]:
+                new_state = (1-mask) * new_state + mask * current_state[0]
+                new_hyp[0] = (1-hyp_mask) * new_hyp[0] + hyp_mask * current_state[1]
+                new_hyp[1] = (1-hyp_mask) * new_hyp[1] + hyp_mask * current_state[2]
+            # prob = tf.cond(tf.equal(is_accepted, tf.constant(True)), lambda:new_prob, lambda:old_prob)
 
-        return [new_state, *new_params], prob, is_accepted[0]
+            # new_state = tf.cond(tf.equal(is_accepted, tf.constant(False)),
+            #                     lambda:current_state[0], lambda:new_state)
+        # new_params = tf.cond(tf.equal(is_accepted, tf.constant(False)),
+        #                         lambda:[current_state[1], current_state[2]], lambda:[v, l2])
+        return [new_state, *new_hyp], f64(0), is_accepted[0]
 
     def _joint_one_step(self, current_state, previous_kernel_results, all_states):
         # Untransformed tf mRNA vectors F (Step 1)
