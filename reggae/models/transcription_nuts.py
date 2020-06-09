@@ -421,32 +421,32 @@ class TranscriptionMixedSampler():
             m_preds.append(self.predict_m_with_results(results, i))
         return np.array(m_preds)
 
-    def results(self):
+    def results(self, burnin=0):
         Δ = σ2_f = k_fbar = None
-        σ2_m = self.samples[self.state_indices['σ2_m']]
+        σ2_m = self.samples[self.state_indices['σ2_m']][burnin:]
         if self.options.preprocessing_variance:
             σ2_m = logit(σ2_m)
         else:
-            σ2_f = self.samples[self.state_indices['σ2_f']]
+            σ2_f = self.samples[self.state_indices['σ2_f']][burnin:]
 
-        kbar = self.samples[self.state_indices['kinetics']][0].numpy()
+        kbar = self.samples[self.state_indices['kinetics']][0].numpy()[burnin:]
         fbar = self.samples[self.state_indices['latents']]
         if self.options.translation:
-            k_fbar = self.samples[self.state_indices['kinetics']][1].numpy()
+            k_fbar = self.samples[self.state_indices['kinetics']][1].numpy()[burnin:]
             if k_fbar.ndim < 3:
                 k_fbar = np.expand_dims(k_fbar, 2)
         if not self.options.joint_latent:
-            kernel_params = self.samples[self.state_indices['kernel_params']]
+            kernel_params = self.samples[self.state_indices['kernel_params']][burnin:]
         else:
-            kernel_params = [fbar[1], fbar[2]]
-            fbar = fbar[0]
+            kernel_params = [fbar[1][burnin:], fbar[2][burnin:]]
+            fbar = fbar[0][burnin:]
         wbar = tf.stack([logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64')) for _ in range(fbar.shape[0])], axis=0)
         w_0bar = tf.stack([0.5*tf.ones(self.num_genes, dtype='float64') for _ in range(fbar.shape[0])], axis=0)
         if self.options.weights:
-            wbar =      self.samples[self.state_indices['kinetics']][2]
-            w_0bar =    self.samples[self.state_indices['kinetics']][3]
+            wbar =      self.samples[self.state_indices['kinetics']][2][burnin:]
+            w_0bar =    self.samples[self.state_indices['kinetics']][3][burnin:]
         if self.options.delays:
-            Δ =  self.samples[self.state_indices['Δ']]
+            Δ =  self.samples[self.state_indices['Δ']][burnin:]
         return SampleResults(self.options, fbar, kbar, k_fbar, Δ, kernel_params, wbar, w_0bar, σ2_m, σ2_f)
 
     def save(self, name):
