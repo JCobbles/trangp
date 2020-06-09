@@ -8,12 +8,13 @@ import numpy as np
 
 
 class DelayKernel(tfp.mcmc.TransitionKernel):
-    def __init__(self, likelihood, lower, upper, state_indices, prior):
+    def __init__(self, likelihood, lower, upper, state_indices, prior, start_iteration=2000):
         self.likelihood = likelihood
         self.state_indices = state_indices
         self.lower = lower
         self.upper = upper
         self.prior = prior
+        self.start_iteration = start_iteration
         
     def one_step(self, current_state, previous_kernel_results, all_states):
         iteration_number = previous_kernel_results.target_log_prob[0] #just roll with it
@@ -60,7 +61,7 @@ class DelayKernel(tfp.mcmc.TransitionKernel):
                 new_state = (1-mask) * new_state + mask * chosen
             return new_state
 #         tf.print('final chosen state', new_state)
-        new_state = tf.cond(iteration_number < 10, lambda: current_state, lambda: proceed())
+        new_state = tf.cond(iteration_number < self.start_iteration, lambda: current_state, lambda: proceed())
         return new_state, GenericResults([iteration_number+1], True)
 
     def bootstrap_results(self, init_state, all_states):
