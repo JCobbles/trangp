@@ -110,13 +110,9 @@ class LatentKernel(MetropolisKernel):
 
             Sinv_g = gg / self.step_size
 
-            # f = tf.zeros((self.num_tfs, 1), dtype='float64')
             nu = tf.linalg.matvec(U_invR, fbar) - tf.squeeze(tf.linalg.solve(tf.transpose(U_invR, [0, 2, 1]), tf.expand_dims(Sinv_g, -1)), -1)
             f = tf.linalg.solve(U_invR_, tf.expand_dims(nu, -1)) + tf.linalg.cholesky_solve(tf.transpose(U_invR_, [0, 2, 1]), tf.expand_dims(Sinv_g, -1))
             f = tf.squeeze(f, -1)
-                # mask = np.zeros((self.num_tfs, 1), dtype='float64')
-                # mask[i] = 1
-                # f = (1-mask) * f + mask * f_i
 
             mask = np.zeros((self.num_replicates, 1, 1), dtype='float64')
             mask[r] = 1
@@ -176,8 +172,8 @@ class LatentKernel(MetropolisKernel):
         c_mu = tf.linalg.matvec(Ksuminv, z_i)
         fstar = tf.linalg.matvec(L, nu) + c_mu
 
-        new_hyp = [v, l2]
-        old_hyp = [current_state[1], current_state[2]]
+        new_hyp = [tf.exp(v), tf.exp(l2)]
+        old_hyp = [tf.exp(current_state[1]), tf.exp(current_state[2])]
         new_prob = self.calc_prob_fn(fstar, new_hyp, old_hyp, all_states)
         old_prob = self.calc_prob_fn(new_state, old_hyp, new_hyp, all_states) #previous_kernel_results.target_log_prob 
 

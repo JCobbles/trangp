@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from matplotlib.animation import FuncAnimation
 import networkx as nx
 import tensorflow as tf
+import random
 
 from reggae.data_loaders import scaled_barenco_data
 from reggae.models.results import SampleResults
@@ -33,8 +34,9 @@ class Plotter():
         if self.opt.gene_names is None:
             self.opt.gene_names = np.array([f'Gene {j}' for j in range(data.m_obs.shape[1])])
         if self.opt.tf_names is None:
-            self.opt.tf_names = [f'TF {i}' for i in range(data.f_obs.shape[1])]
-
+            self.opt.tf_names = np.array([f'TF {i}' for i in range(data.f_obs.shape[1])])
+        self.num_tfs = data.f_obs.shape[1]
+        self.num_genes = data.m_obs.shape[1]
         self.data = data
         self.τ = data.τ
         self.t = data.t
@@ -44,7 +46,6 @@ class Plotter():
         k_latest = np.mean(k[-self.opt.num_kinetic_avg:], axis=0)
         num_genes = k.shape[1]
         plot_labels = ['Initial Conditions', 'Basal rates', 'Decay rates', 'Sensitivities']
-
 
         width = 18 if num_genes > 10 else 10
         plt.figure(figsize=(width, 13))
@@ -247,32 +248,47 @@ class Plotter():
                                     frames=f_samples.shape[0]//10, interval=50, blit=True)
         return anim.to_html5_video()
 
-    def plot_grn(self, w):
-        G = nx.Graph()
+    def plot_grn(self, results, use_basal=True, use_sensitivities=True):
+        G = nx.DiGraph()
         pos=nx.spring_layout(G, seed=42)
-        import random
         random.seed(42)
         np.random.seed(42)
+        nodes, node_colors, sizes, edges, colors = list(), list(), list(), list(), list()
 
-        min = tf.math.reduce_min(w).numpy()
-        diff = tf.math.reduce_max(w).numpy() - min
-        nodes = list()
-
-        for j in range(w.shape[0]):
-            nodes.append(self.opt.gene_names[j])
-        for i in range(w.shape[1]):
+        for i in range(self.opt.tf_names.shape[0]):
             nodes.append(self.opt.tf_names[i])
+            node_colors.append('slategrey')
+            sizes.append(1000)
 
-        edges = list()
-        colors = list()
-        for j in range(5):
-            for i in range(3):
-                edge = (self.opt.gene_names[j], self.opt.tf_names[i])
-                colors.append(f'{(w[j, i]-min) / diff}')
+        for j in range(self.opt.gene_names.shape[0]):
+            nodes.append(self.opt.gene_names[j])
+            node_colors.append('chocolate')
+
+        k = np.mean(results.k[-self.opt.num_kinetic_avg:], axis=0)
+        b = k[:, 1]
+        s = k[:, 3]
+        w = np.mean(results.weights[0][-100:], axis=0)
+        s_min = np.min(s)
+        s_diff = max(s) - s_min
+        b_min = np.min(b)
+        b_diff = max(b) - b_min
+        w_min = tf.math.reduce_min(w).numpy()
+        diff = tf.math.reduce_max(w).numpy() - w_min
+
+        for j in range(self.num_genes):
+            for i in range(self.num_tfs):
+                edge = (self.opt.tf_names[i], self.opt.gene_names[j])
+                weight = (s[j]-s_min) / s_diff if use_sensitivities else (w[j, i]-w_min) / diff
+                colors.append(f'{1-weight}')
                 edges.append(edge)
+            if use_basal:
+                sizes.append(int(700 + 1700 * (b[j]-b_min)/b_diff))
+        G.add_nodes_from(nodes)
         G.add_edges_from(edges)
-
-        nx.draw(G, edge_color=colors, node_size=1000, with_labels=True)
+        node_size = sizes if use_basal else 1000
+        pos=nx.spring_layout(G, seed=42)
+        pos = nx.nx_pydot.graphviz_layout(G, prog='dot')
+        nx.draw(G, pos=pos, edge_color=colors, node_color=node_colors, node_size=node_size, with_labels=True)
 
     def summary(self, results: SampleResults, m_preds, true_k=None, true_k_f=None,
                 replicate=0, scale_observed=False):

@@ -21,7 +21,7 @@ class GPKernelSelector():
         self.tprime2 = tf.square(t_2)
         self.fixed_dist = FixedDistribution(tf.ones(self.num_tfs, dtype='float64'))
         min_dist = min(data.t[1:]-data.t[:-1])
-        min_dist = max(min_dist, 1.5)
+        min_dist = max(min_dist, 1.)
         self._ranges = {
             'rbf': [(f64(1e-4), f64(5)), #1+max(np.var(data.f_obs, axis=2))
                     (f64(min_dist**2)-1.2, f64(data.t[-1]**2))],
@@ -50,8 +50,8 @@ class GPKernelSelector():
 
     def initial_params(self):
         if self.kernel == 'rbf':
-            return [1.5*tf.ones(self.num_tfs, dtype='float64'), 
-                    4*tf.ones(self.num_tfs, dtype='float64')]
+            return [1.1*tf.ones(self.num_tfs, dtype='float64'), 
+                    2*tf.ones(self.num_tfs, dtype='float64')]
         elif self.kernel == 'mlp':
             return [0.8*tf.ones(self.num_tfs, dtype='float64'), 
                     0.98*tf.ones(self.num_tfs, dtype='float64')]
@@ -70,6 +70,8 @@ class GPKernelSelector():
         return self._proposals[self.kernel][hyp_index](current_val)
 
     def rbf(self, v, l2):
+        v = tf.exp(v)
+        l2 = tf.exp(l2)
         sq_dist = tf.divide(tfm.square(self.t_dist), tf.reshape(2*l2, (-1, 1, 1)))
         K = tf.reshape(v, (-1, 1, 1)) * tfm.exp(-sq_dist)
         m = tf.zeros((self.N_p), dtype='float64')
