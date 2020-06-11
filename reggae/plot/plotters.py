@@ -231,24 +231,56 @@ class Plotter():
             plt.plot(w_0[:,j])
         plt.title('Interaction bias')
 
-    def anim_latent(self, results, index=0, replicate=0):
+    '''
+    Plots convergence with histogram on the side
+    Args:
+      samples: 1D array
+      lims: tuple (lower, upper)
+    '''
+    def plot_convergence(self, samples, lims=None, fig_height=6, fig_width=8, color='slategrey'):
+        left, width = 0.1, 0.65
+        bottom, height = 0.1, 0.65
+        spacing = 0.005
+        rect_scatter = [left, bottom, width, height]
+        rect_histy = [left + width + spacing, bottom, 0.2, height]
+        plt.figure(figsize=(fig_width, fig_height))
+
+        ax_scatter = plt.axes(rect_scatter)
+        ax_scatter.tick_params(direction='in', top=True, right=True)
+        ax_histy = plt.axes(rect_histy)
+        ax_histy.tick_params(direction='in', labelleft=False)
+
+        # the scatter plot:
+        ax_scatter.plot(samples, color=color)
+
+        # now determine nice limits by hand:
+        binwidth = 0.25
+        if lims is None:
+            lims = (0, np.ceil(samples.max() / binwidth) * binwidth)
+        # ax_scatter.set_xlim((-lim, lim))
+        ax_scatter.set_ylim(lims)
+        ax_histy.hist(samples, orientation='horizontal', color=color, bins='auto')#, bins=bins)
+
+        ax_histy.set_ylim(ax_scatter.get_ylim())
+
+    def anim_latent(self, samples, index=0, replicate=0, interval=10):
         fig = plt.figure()
-        ax = plt.axes(xlim=(-1, 13), ylim=(-1, 4))
+        s_min, s_max = np.min(samples[:, 0, 0, :]), np.max(samples[:, replicate, index, :])
+        ax = plt.axes(xlim=(-1, 13), ylim=(s_min-0.4, s_max+0.4))
         line, = ax.plot([], [], lw=3)
-        f_samples = results.f
         def init():
             line.set_data([], [])
             return line,
         def animate(i):
-            x = np.linspace(0, 12, f_samples.shape[3])
-            y = f_samples[i*10, replicate, index]
+            x = np.linspace(0, 12, samples.shape[3])
+            y = samples[i*interval, replicate, index]
             line.set_data(x, y)
             return line,
         anim = FuncAnimation(fig, animate, init_func=init,
-                                    frames=f_samples.shape[0]//10, interval=50, blit=True)
+                                    frames=samples.shape[0]//interval, interval=50, blit=True)
         return anim.to_html5_video()
 
-    def plot_grn(self, results, use_basal=True, use_sensitivities=True):
+    def plot_grn(self, results, use_basal=True, use_sensitivities=True, log=False):
         G = nx.DiGraph()
         pos=nx.spring_layout(G, seed=42)
         random.seed(42)
@@ -268,6 +300,8 @@ class Plotter():
         b = k[:, 1]
         s = k[:, 3]
         w = np.mean(results.weights[0][-100:], axis=0)
+        if log:
+            w = np.exp(w)
         s_min = np.min(s)
         s_diff = max(s) - s_min
         b_min = np.min(b)
