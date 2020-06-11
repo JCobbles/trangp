@@ -37,14 +37,23 @@ class MixedKernel(tfp.mcmc.TransitionKernel):
                 new_state.append(current_state[i])
                 inner_results.append(previous_kernel_results.inner_results[i])
                 continue
+
             if self.send_all_states[i]:
                 wrapped_state_i = current_state[i]
                 if type(wrapped_state_i) is not list:
                     wrapped_state_i = [wrapped_state_i]
 
                 tgt_prob = self.kernels[i].target_log_prob_fn_fn(current_state)(*wrapped_state_i)
-                previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
-                    target_log_prob=tgt_prob)
+                if hasattr(previous_kernel_results.inner_results[i], 'accepted_results'):
+                    # if i == 3:
+                    #     tf.print('tgt', tgt_prob)
+                    
+                    propres = previous_kernel_results.inner_results[i].accepted_results._replace(target_log_prob=tgt_prob)
+                    previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
+                        proposed_results=propres)
+                else:
+                    previous_kernel_results.inner_results[i] = previous_kernel_results.inner_results[i]._replace(
+                        target_log_prob=tgt_prob)
 
             args = []
             try:

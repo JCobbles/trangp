@@ -23,6 +23,7 @@ class LatentKernel(MetropolisKernel):
         self.num_tfs = data.f_obs.shape[1]
         self.num_genes = data.m_obs.shape[1]
         self.likelihood = likelihood
+        self.options = options
         self.tf_mrna_present = options.tf_mrna_present
         self.state_indices = state_indices
         self.num_replicates = data.f_obs.shape[0]
@@ -221,12 +222,15 @@ class LatentKernel(MetropolisKernel):
         new_prob = tf.reduce_sum(new_m_likelihood) + new_f_likelihood
 
         new_prob += tf.reduce_sum(
-            self.kernel_priors[0].log_prob(new_hyp[0]) + \
-            self.kernel_priors[1].log_prob(new_hyp[1])
-        )
-        new_prob += tf.reduce_sum(
             self.kernel_selector.proposal(0, new_hyp[0]).log_prob(old_hyp[0]) + \
             self.kernel_selector.proposal(1, new_hyp[1]).log_prob(old_hyp[1])
+        )
+        if self.options.kernel_exponential:
+            new_hyp = [tf.exp(new_hyp[0]), tf.exp(new_hyp[1])]
+
+        new_prob += tf.reduce_sum(
+            self.kernel_priors[0].log_prob(new_hyp[0]) + \
+            self.kernel_priors[1].log_prob(new_hyp[1])
         )
         return new_prob
 
