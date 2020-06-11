@@ -6,12 +6,12 @@ from tensorflow import math as tfm
 
 from reggae.data_loaders import DataHolder
 from reggae.utilities import discretise, logistic
-from reggae.models import TranscriptionLikelihood, Options
+from reggae.models import Options
 
 f64 = np.float64
 
-def artificial_dataset(opt, num_genes=13, num_tfs=3, weights=None, delays=[1, 4, 10], true_kbar=None):
-    t = np.arange(12)
+def artificial_dataset(opt, likelihood_class, t_end=12, num_genes=13, num_tfs=3, weights=None, delays=[1, 4, 10], true_kbar=None):
+    t = np.arange(t_end)
     τ, common_indices = discretise(t)
     time = (t, τ, tf.constant(common_indices))
     N_p = τ.shape[0]
@@ -34,7 +34,7 @@ def artificial_dataset(opt, num_genes=13, num_tfs=3, weights=None, delays=[1, 4,
     f_observed = tf.stack([fbar[:, i, common_indices] for i in range(num_tfs)], axis=1)
     fbar = tfm.log((tfm.exp(fbar)-1))
     f_i = tfm.log(1+tfm.exp(fbar))
-
+    f_observed += tf.random.normal([N_m], stddev=tf.sqrt(0.02*f_observed), dtype='float64')
     # Kinetics
     true_k_fbar = logistic(f64(np.array([2, 2, 2]).T)) #a was [0.1, 0.1, 0.1]
     if true_kbar is None:
@@ -61,13 +61,13 @@ def artificial_dataset(opt, num_genes=13, num_tfs=3, weights=None, delays=[1, 4,
 
     # Genes
     temp_data = DataHolder((np.ones((1, num_genes, N_m)), np.ones((1, num_tfs, N_m))), None, time)
-    temp_lik = TranscriptionLikelihood(temp_data, opt)
+    temp_lik = likelihood_class(temp_data, opt)
     
     Δ = tf.constant(delays, dtype='float64')
-    m_pred = temp_lik.predict_m(true_kbar, true_k_fbar, logistic(w), fbar, logistic(w_0), Δ)
+    m_pred = temp_lik.predict_m(true_kbar, true_k_fbar, (w), fbar, (w_0), Δ)
 
     m_observed = tf.stack([m_pred.numpy()[:,i,common_indices] for i in range(num_genes)], axis=1)
-
+    m_observed += tf.random.normal([N_m], stddev=tf.sqrt(0.02*m_observed), dtype='float64')
     data = (m_observed, f_observed)
 
     data = DataHolder(data, None, time)
