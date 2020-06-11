@@ -84,25 +84,30 @@ class TranscriptionLikelihood():
                                   wbar=None, w_0bar=None, σ2_m=None, Δ=None):
         nuts_index = 0
         kbar = all_states[state_indices['kinetics']][nuts_index] if kbar is None else kbar
-        k_fbar = None
         if self.options.translation:
             nuts_index+=1
             k_fbar = all_states[state_indices['kinetics']][nuts_index] if k_fbar is None else k_fbar
-        wbar = logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64'))
-        w_0bar = 0.5*tf.ones(self.num_genes, dtype='float64')
+        else:
+            k_fbar = None
+
         if self.options.weights:
             nuts_index+=1
             wbar = all_states[state_indices['weights']][0] if wbar is None else wbar
             w_0bar = all_states[state_indices['weights']][1] if w_0bar is None else w_0bar
+        else:
+            wbar = logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64'))
+            w_0bar = 0.5*tf.ones(self.num_genes, dtype='float64')
+
         σ2_m = all_states[state_indices['σ2_m']] if σ2_m is None else σ2_m
 
         if fbar is None:
             fbar = all_states[state_indices['latents']]
             if self.options.joint_latent:
                 fbar = fbar[0]
-        Δ = tf.zeros((self.num_tfs,), dtype='float64')
         if self.options.delays:
             Δ = all_states[state_indices['Δ']] if Δ is None else Δ
+        else:
+            Δ = tf.zeros((self.num_tfs,), dtype='float64')
         return fbar, k_fbar, kbar, wbar, w_0bar, σ2_m, Δ
 
     @tf.function#(experimental_compile=True)
