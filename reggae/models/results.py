@@ -47,7 +47,7 @@ class SampleResults:
         return logit(self.k_fbar).numpy()
     @property
     def weights(self):
-        return [logit(self.wbar), logit(self.w_0bar)]
+        return [(self.wbar), (self.w_0bar)]
 
 @dataclass
 class SampleResultsMH(SampleResults):

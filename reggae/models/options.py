@@ -12,3 +12,5 @@ class Options:
     initial_conditions:     bool = True  # True if initial conditions for gene mRNA used
     translation:            bool = True  # True if the translation mechanism is active
     kinetic_exponential:    bool = False # True if kinetic params are exponentiated
+    kernel_exponential:     bool = False # True if kernel params are exponentiated
+    

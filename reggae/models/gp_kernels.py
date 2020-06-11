@@ -28,7 +28,7 @@ class GPKernelSelector():
             'mlp': [(f64(1), f64(10)), (f64(3.5), f64(20))],
         }
         self._priors = {
-            'rbf': [tfd.Uniform(f64(1), f64(10)), tfd.Uniform(f64(min_dist**2), f64(7))],
+            'rbf': [tfd.Uniform(f64(1), f64(20)), tfd.Uniform(f64(min_dist**2), f64(10))],
             'mlp': [tfd.Uniform(f64(3.5), f64(10)), tfd.InverseGamma(f64(0.01), f64(0.01))],
         }
         v_prop = lambda v: tfd.TruncatedNormal(v, 0.007, low=0, high=100)
@@ -70,8 +70,9 @@ class GPKernelSelector():
         return self._proposals[self.kernel][hyp_index](current_val)
 
     def rbf(self, v, l2):
-        v = tf.exp(v)
-        l2 = tf.exp(l2)
+        if self.options.kernel_exponential:
+            v = tf.exp(v)
+            l2 = tf.exp(l2)
         sq_dist = tf.divide(tfm.square(self.t_dist), tf.reshape(2*l2, (-1, 1, 1)))
         K = tf.reshape(v, (-1, 1, 1)) * tfm.exp(-sq_dist)
         m = tf.zeros((self.N_p), dtype='float64')
