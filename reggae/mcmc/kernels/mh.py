@@ -4,7 +4,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow import math as tfm
 
-from reggae.models.results import GenericResults
+from reggae.mcmc.results import GenericResults
 
 import numpy as np
 f64 = np.float64

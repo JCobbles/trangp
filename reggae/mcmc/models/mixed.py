@@ -9,13 +9,14 @@ from tensorflow_probability import distributions as tfd
 
 from reggae.mcmc import MetropolisHastings
 from reggae.mcmc.parameter import KernelParameter, Parameter, Params
-from reggae.models.results import GenericResults, SampleResults
-from reggae.models import Options, GPKernelSelector
+from reggae.mcmc.results import GenericResults, SampleResults
+from reggae.mcmc import Options
+from reggae.gp import GPKernelSelector
 from reggae.mcmc.kernels import LatentKernel, MixedKernel, DelayKernel, GibbsKernel
 from reggae.mcmc.kernels.wrappers import RWMWrapperKernel
 from reggae.data_loaders import DataHolder
 from reggae.utilities import jitter_cholesky, logit, logistic, LogisticNormal, inverse_positivity, save_object
-from reggae.models.likelihood import TranscriptionLikelihood
+from reggae.mcmc import TranscriptionLikelihood
 
 import numpy as np
 

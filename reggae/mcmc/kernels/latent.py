@@ -3,9 +3,9 @@ from tensorflow_probability import distributions as tfd
 
 from reggae.mcmc.kernels.mh import MetropolisKernel
 from reggae.mcmc.kernels.wrappers import ESSWrapper
-from reggae.models import GPKernelSelector
+from reggae.gp.std_kernels import GPKernelSelector
 from reggae.utilities import jitter_cholesky, logit, add_diag
-from reggae.models.results import GenericResults
+from reggae.mcmc.results import GenericResults
 
 import numpy as np
 f64 = np.float64

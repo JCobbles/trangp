@@ -3,12 +3,12 @@ from tensorflow import math as tfm
 import tensorflow_probability as tfp
 
 from reggae.mcmc import MetropolisHastings
-from reggae.models.results import GenericResults, MixedKernelResults
+from reggae.mcmc.results import GenericResults, MixedKernelResults
 import numpy as np
 
 
 class DelayKernel(tfp.mcmc.TransitionKernel):
-    def __init__(self, likelihood, lower, upper, state_indices, prior, start_iteration=2000):
+    def __init__(self, likelihood, lower, upper, state_indices, prior, start_iteration=1):
         self.likelihood = likelihood
         self.state_indices = state_indices
         self.lower = lower
@@ -45,7 +45,7 @@ class DelayKernel(tfp.mcmc.TransitionKernel):
                         all_states=all_states, 
                         state_indices=self.state_indices,
                         Δ=test_state,
-                    ))) #+ tf.reduce_sum(self.prior.log_prob(Δ)))
+                    )) + tf.reduce_sum(self.prior.log_prob(Δ)))
                 # curri = tf.cast(current_state[i], 'int64')
                 # start_index = tf.reduce_max([self.lower, curri-2])
                 # probs = tf.gather(probs, tf.range(start_index, 

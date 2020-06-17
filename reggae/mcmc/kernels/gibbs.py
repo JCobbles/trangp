@@ -2,7 +2,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability import distributions as tfd
 
-from reggae.models.results import GenericResults
+from reggae.mcmc.results import GenericResults
 
 
 class GibbsKernel(tfp.mcmc.TransitionKernel):

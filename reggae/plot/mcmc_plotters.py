@@ -8,7 +8,7 @@ import tensorflow as tf
 import random
 
 from reggae.data_loaders import scaled_barenco_data
-from reggae.models.results import SampleResults
+from reggae.mcmc.results import SampleResults
 
 
 @dataclass

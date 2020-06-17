@@ -5,9 +5,9 @@ import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
 from reggae.mcmc import MetropolisHastings, Parameter
-from reggae.models import GPKernelSelector
+from reggae.gp import GPKernelSelector
 from reggae.utilities import exp, mult, jitter_cholesky, save_object
-from reggae.models.results import GenericResults
+from reggae.mcmc.results import GenericResults
 import reggae
 
 import numpy as np
