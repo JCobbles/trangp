@@ -48,7 +48,7 @@ class Plotter():
         plot_labels = ['Initial Conditions', 'Basal rates', 'Decay rates', 'Sensitivities']
 
         width = 18 if num_genes > 10 else 10
-        plt.figure(figsize=(width, 13))
+        plt.figure(figsize=(width, 16))
         if not self.opt.for_report:
             plt.suptitle('Transcription ODE Kinetic Parameters')
 

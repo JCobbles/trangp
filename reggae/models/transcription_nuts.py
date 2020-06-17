@@ -111,8 +111,29 @@ class TranscriptionMixedSampler():
         # Kinetic parameters & Interaction weights
         w_prior = LogisticNormal(f64(-2), f64(2))
         w_initial = logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64'))
-        w_0_prior = LogisticNormal(f64(-1), f64(1))
-        w_0_initial = 0.5*tf.ones(self.num_genes, dtype='float64')
+        w_0_prior = LogisticNormal(f64(-0.8), f64(0.8))
+        w_0_initial = logistic(0*tf.ones(self.num_genes, dtype='float64'))
+        def weights_log_prob(all_states):
+            def weights_log_prob_fn(wbar, w_0bar):
+                # tf.print((wbar))
+                new_prob = tf.reduce_sum(self.params.weights.prior[0].log_prob((wbar))) 
+                new_prob += tf.reduce_sum(self.params.weights.prior[1].log_prob((w_0bar)))
+                
+                new_prob += tf.reduce_sum(self.likelihood.genes(
+                    all_states=all_states,
+                    state_indices=self.state_indices,
+                    wbar=wbar,
+                    w_0bar=w_0bar
+                ))
+                # tf.print(new_prob)
+                return new_prob
+            return weights_log_prob_fn
+        weights_kernel = RWMWrapperKernel(weights_log_prob, 
+                new_state_fn=tfp.mcmc.random_walk_normal_fn(scale=0.08))
+        weights = KernelParameter(
+            'weights', [w_prior, w_0_prior], [w_initial, w_0_initial],
+            hmc_log_prob=weights_log_prob, step_size=10*logistic_step_size, requires_all_states=True)
+            #TODO kernel=weights_kernel
 
         num_kin = 4 if self.options.initial_conditions else 3
         kbar_initial = 0.8*tf.ones((self.num_genes, num_kin), dtype='float64')
@@ -134,22 +155,20 @@ class TranscriptionMixedSampler():
                     k_fbar = args[index]
                     lik_args['k_fbar'] = k_fbar
                     kfprob = tf.reduce_sum(self.params.kinetics.prior[index].log_prob(logit(k_fbar)))
-                    # tf.print('k_f_', kfprob)
                     new_prob += kfprob
                 if options.weights:
-                    index+= 1
-                    wbar, w_0bar = args[index], args[index+1]
+                    index += 1
+                    wbar = args[index]
+                    w_0bar = args[index+1]
+                    new_prob += tf.reduce_sum(self.params.weights.prior[0].log_prob((wbar))) 
+                    new_prob += tf.reduce_sum(self.params.weights.prior[1].log_prob((w_0bar)))
                     lik_args['wbar'] = wbar
                     lik_args['w_0bar'] = w_0bar
-                    new_prob += tf.reduce_sum(self.params.kinetics.prior[index].log_prob(logit(wbar))) 
-                    new_prob += tf.reduce_sum(self.params.kinetics.prior[index+1].log_prob(logit(w_0bar)))
-                
                 new_prob += tf.reduce_sum(self.likelihood.genes(
                     all_states=all_states,
                     state_indices=self.state_indices,
                     **lik_args
                 ))
-                # tf.print('end_prob', new_prob)
                 return tf.reduce_sum(new_prob)
             return kbar_log_prob_fn
 
@@ -157,13 +176,12 @@ class TranscriptionMixedSampler():
         k_fbar_initial = 0.8*tf.ones((self.num_tfs,), dtype='float64')
 
         kinetics_initial = [kbar_initial]
-        kinetics_priors = [LogisticNormal(0.01, 100)]
+        kinetics_priors = [LogisticNormal(0.01, 30)]
         if options.translation:
             kinetics_initial += [k_fbar_initial]
             kinetics_priors += [LogisticNormal(0.1, 7)]
         if options.weights:
             kinetics_initial += [w_initial, w_0_initial]
-            kinetics_priors += [w_prior, w_0_prior]
         kinetics = KernelParameter(
             'kinetics', 
             kinetics_priors, 
@@ -185,13 +203,15 @@ class TranscriptionMixedSampler():
                                  self.state_indices, f_sq_diff_fn)
             σ2_f = KernelParameter('σ2_f', None, 1e-4*tf.ones((self.num_tfs,1), dtype='float64'), kernel=kernel)
         
-        self.params = Params(latents, None, kinetics, Δ, kernel_params, σ2_m, σ2_f)
+        self.params = Params(latents, weights, kinetics, Δ, kernel_params, σ2_m, σ2_f)
         
         self.active_params = [
             self.params.kinetics,
             self.params.latents,
             self.params.σ2_m,
         ]
+        # if options.weights:
+        #     self.active_params += [self.params.weights]
         if not options.joint_latent:
             self.active_params += [self.params.kernel_params]
         if not options.preprocessing_variance:
@@ -213,7 +233,7 @@ class TranscriptionMixedSampler():
         return prob
 
 
-    def sample(self, T=2000, store_every=10, burn_in=1000, report_every=100, num_chains=4, profile=False):
+    def sample(self, T=2000, store_every=10, burn_in=1000, report_every=100, skip=None, num_chains=4, profile=False):
         print('----- Sampling Begins -----')
         
         kernels = [param.kernel for param in self.active_params]
@@ -221,7 +241,7 @@ class TranscriptionMixedSampler():
         send_all_states = [param.requires_all_states for param in self.active_params]
 
         current_state = [param.value for param in self.active_params]
-        mixed_kern = MixedKernel(kernels, send_all_states, T)
+        mixed_kern = MixedKernel(kernels, send_all_states, T, skip=skip)
         
         def trace_fn(a, previous_kernel_results):
             return previous_kernel_results.is_accepted
@@ -271,12 +291,14 @@ class TranscriptionMixedSampler():
     def sample_proteins(self, results, num_results):
         p_samples = list()
         for i in range(1, num_results+1):
-            p_samples.append(self.likelihood.calculate_protein(results.fbar[-i], results.k_fbar[-i], None))
+            delta = results.Δ[i] if results.Δ is not None else None
+            p_samples.append(self.likelihood.calculate_protein(results.fbar[-i], 
+                             results.k_fbar[-i], delta))
         return np.array(p_samples)
 
-    def sample_latents(self, results, num_results):
+    def sample_latents(self, results, num_results, step=1):
         m_preds = list()
-        for i in range(1, num_results):
+        for i in range(1, num_results, step):
             m_preds.append(self.predict_m_with_results(results, i))
         return np.array(m_preds)
 
@@ -288,10 +310,12 @@ class TranscriptionMixedSampler():
         else:
             σ2_f = self.samples[self.state_indices['σ2_f']][burnin:]
 
-        kbar = self.samples[self.state_indices['kinetics']][0].numpy()[burnin:]
+        nuts_index = 0
+        kbar = self.samples[self.state_indices['kinetics']][nuts_index].numpy()[burnin:]
         fbar = self.samples[self.state_indices['latents']]
         if self.options.translation:
-            k_fbar = self.samples[self.state_indices['kinetics']][1].numpy()[burnin:]
+            nuts_index += 1
+            k_fbar = self.samples[self.state_indices['kinetics']][nuts_index].numpy()[burnin:]
             if k_fbar.ndim < 3:
                 k_fbar = np.expand_dims(k_fbar, 2)
         if not self.options.joint_latent:
@@ -302,8 +326,9 @@ class TranscriptionMixedSampler():
         wbar = tf.stack([logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64')) for _ in range(fbar.shape[0])], axis=0)
         w_0bar = tf.stack([0.5*tf.ones(self.num_genes, dtype='float64') for _ in range(fbar.shape[0])], axis=0)
         if self.options.weights:
-            wbar =      self.samples[self.state_indices['kinetics']][2][burnin:]
-            w_0bar =    self.samples[self.state_indices['kinetics']][3][burnin:]
+            nuts_index += 1
+            wbar =      self.samples[self.state_indices['kinetics']][nuts_index][burnin:]
+            w_0bar =    self.samples[self.state_indices['kinetics']][nuts_index+1][burnin:]
         if self.options.delays:
             Δ =  self.samples[self.state_indices['Δ']][burnin:]
         return SampleResults(self.options, fbar, kbar, k_fbar, Δ, kernel_params, wbar, w_0bar, σ2_m, σ2_f)

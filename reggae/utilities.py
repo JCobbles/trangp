@@ -69,7 +69,9 @@ def jitter_cholesky(A):
 
 def inverse_positivity(fbar):
     return tfm.log(1+tfm.exp(fbar))
-
+def positivity(f_i):
+    return tfm.log(tfm.exp(f_i) - 1)
+    
 class ArrayList:
     def __init__(self, shape):
         self.capacity = 100

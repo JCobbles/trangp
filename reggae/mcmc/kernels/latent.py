@@ -173,8 +173,8 @@ class LatentKernel(MetropolisKernel):
         c_mu = tf.linalg.matvec(Ksuminv, z_i)
         fstar = tf.linalg.matvec(L, nu) + c_mu
 
-        new_hyp = [tf.exp(v), tf.exp(l2)]
-        old_hyp = [tf.exp(current_state[1]), tf.exp(current_state[2])]
+        new_hyp = [v, l2]
+        old_hyp = [current_state[1], current_state[2]]
         new_prob = self.calc_prob_fn(fstar, new_hyp, old_hyp, all_states)
         old_prob = self.calc_prob_fn(new_state, old_hyp, new_hyp, all_states) #previous_kernel_results.target_log_prob 
 

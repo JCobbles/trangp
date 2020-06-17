@@ -80,7 +80,7 @@ class TranscriptionLikelihood():
         return m_pred
 
     def get_parameters_from_state(self, all_states, state_indices,
-                                  fbar=None, k_fbar=None, kbar=None, 
+                                  fbar=None, kbar=None, k_fbar=None,
                                   wbar=None, w_0bar=None, σ2_m=None, Δ=None):
         nuts_index = 0
         kbar = all_states[state_indices['kinetics']][nuts_index] if kbar is None else kbar
@@ -92,8 +92,8 @@ class TranscriptionLikelihood():
 
         if self.options.weights:
             nuts_index+=1
-            wbar = all_states[state_indices['weights']][0] if wbar is None else wbar
-            w_0bar = all_states[state_indices['weights']][1] if w_0bar is None else w_0bar
+            wbar = all_states[state_indices['kinetics']][nuts_index] if wbar is None else wbar
+            w_0bar = all_states[state_indices['kinetics']][nuts_index+1] if w_0bar is None else w_0bar
         else:
             wbar = logistic(1*tf.ones((self.num_genes, self.num_tfs), dtype='float64'))
             w_0bar = 0.5*tf.ones(self.num_genes, dtype='float64')
@@ -108,12 +108,24 @@ class TranscriptionLikelihood():
             Δ = all_states[state_indices['Δ']] if Δ is None else Δ
         else:
             Δ = tf.zeros((self.num_tfs,), dtype='float64')
-        return fbar, k_fbar, kbar, wbar, w_0bar, σ2_m, Δ
+        return fbar, kbar, k_fbar, wbar, w_0bar, σ2_m, Δ
+
+    @tf.function
+    def _genes(self, fbar, kbar, k_fbar, wbar, w_0bar, σ2_m, Δ):
+        m_pred = self.predict_m(kbar, k_fbar, wbar, fbar, w_0bar, Δ)
+        sq_diff = tfm.square(self.data.m_obs - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
+
+        variance = tf.reshape(σ2_m, (-1, 1))
+        if self.preprocessing_variance:
+            variance = logit(variance) + self.data.σ2_m_pre # add PUMA variance
+        log_lik = -0.5*tfm.log(2*PI*variance) - 0.5*sq_diff/variance
+        log_lik = tf.reduce_sum(log_lik)
+        return log_lik
 
     @tf.function#(experimental_compile=True)
     def genes(self, all_states=None, state_indices=None,
-              k_fbar=None,
               kbar=None, 
+              k_fbar=None,
               fbar=None, 
               wbar=None,
               w_0bar=None,
@@ -124,19 +136,9 @@ class TranscriptionLikelihood():
         If any of the optional args are None, they are replaced by their 
         current value in all_states.
         '''
-        fbar, k_fbar, kbar, wbar, w_0bar, σ2_m, Δ = self.get_parameters_from_state(
-            all_states, state_indices, fbar, k_fbar, kbar, wbar, w_0bar, σ2_m, Δ)
-        m_pred = self.predict_m(kbar, k_fbar, wbar, fbar, w_0bar, Δ)
-        sq_diff = tfm.square(self.data.m_obs - tf.transpose(tf.gather(tf.transpose(m_pred),self.data.common_indices)))
-        # sq_diff = tf.reduce_sum(sq_diff, axis=0)
-        variance = tf.reshape(σ2_m, (-1, 1))
-        if self.preprocessing_variance:
-            variance = logit(variance) + self.data.σ2_m_pre # add PUMA variance
-        # print(variance.shape, sq_diff.shape)
-        # tf.print(variance)
-        log_lik = -0.5*tfm.log(2*PI*variance) - 0.5*sq_diff/variance
-        log_lik = tf.reduce_sum(log_lik)
-        return log_lik
+        params = self.get_parameters_from_state(
+            all_states, state_indices, fbar, kbar, k_fbar, wbar, w_0bar, σ2_m, Δ)
+        return self._genes(*params)
 
     @tf.function#(experimental_compile=True)
     def tfs(self, σ2_f, fbar): 
