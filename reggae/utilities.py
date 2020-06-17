@@ -5,8 +5,10 @@ from tensorflow import linalg
 from tensorflow_probability import distributions as tfd
 from datetime import datetime
 import pickle
+import math
 
 f64 = np.float64
+PI = tf.constant(math.pi, dtype='float64')
 
 def discretise(t, num_disc = 10):
     gcd = np.gcd.reduce(t)
@@ -69,9 +71,17 @@ def jitter_cholesky(A):
 
 def inverse_positivity(fbar):
     return tfm.log(1+tfm.exp(fbar))
+
 def positivity(f_i):
     return tfm.log(tfm.exp(f_i) - 1)
     
+def broadcast_tile(a, h, w):
+    x, y = a.shape
+    m, n = x * h, y * w
+    return tf.reshape(tf.broadcast_to(
+        tf.reshape(a, (x, m//(h*x), y, n//(w*y))), (m//h, h, n//w, w)
+    ), (m, n))
+
 class ArrayList:
     def __init__(self, shape):
         self.capacity = 100
