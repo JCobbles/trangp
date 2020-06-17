@@ -50,6 +50,7 @@ class LinearResponseKernel(gpflow.kernels.Kernel):
           X:  x the blocked observation vector
           X2: x* the non-blocked prediction timepoint vector
         '''
+        self.block_size = X.shape[0]
         self.hori_block_size = int(X2.shape[0])
         self.vert_block_size = int(X.shape[0])
         shape = [X.shape[0]*self.num_genes, X2.shape[0]*self.num_genes]
@@ -59,7 +60,7 @@ class LinearResponseKernel(gpflow.kernels.Kernel):
                 mask = np.ones(shape)
                 other = np.zeros(shape)
                 mask[j*self.vert_block_size:(j+1)*self.vert_block_size, 
-                        k*self.hori_block_size:(k+1)*self.hori_block_size] = 0
+                     k*self.hori_block_size:(k+1)*self.hori_block_size] = 0
                 pad_top = j*self.vert_block_size
                 pad_left = k*self.hori_block_size
                 pad_right = 0 if k == self.num_genes-1 else shape[1]-self.hori_block_size-pad_left
@@ -199,6 +200,6 @@ class LinearResponseKernel(gpflow.kernels.Kernel):
         I know if I should return K_ff or K_xx. In this case we're returning K_ff!!
         $K_{ff}^{post} = K_{ff} - K_{fx} K_{xx}^{-1} K_{xf}$"""
         _,_,t_dist = self.get_distance_matrix(t_x=tf.reshape(X, (-1,)))
-        K_ff = tf.math.exp(-(t_dist**2)/(2*self.lengthscale**2))
+        K_ff = self.kervar **2 * tfm.exp(-(t_dist**2)/(self.lengthscale**2))
         return (K_ff)
 

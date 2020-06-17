@@ -26,11 +26,11 @@ class LinearResponseModel():
         self.X = np.c_[[X for _ in range(self.num_genes)]].reshape(-1, 1)
 
         self.kernel = LinearResponseKernel(data, self.Y_var)
-        self.meanfunc_exp = LinearResponseMeanFunction(data, self.kernel)
+        self.mean_function = LinearResponseMeanFunction(data, self.kernel)
         self.internal_model = gpflow.models.GPR(
             data=(self.X, self.Y), 
             kernel=self.kernel, 
-            mean_function=self.meanfunc_exp
+            mean_function=self.mean_function
         )
 
     def objective_closure(self):
@@ -48,16 +48,23 @@ class LinearResponseModel():
         print(f'Time taken: {(end - start):.04f}s')
         return opt_logs
 
-    def predict_x(self, pred_t):
+    def predict_x(self, pred_t, compute_var=True):
         K_xx = self.kernel.K(self.X, None)
         K_inv = tf.linalg.inv(K_xx)
         K_xstarx = tf.transpose(self.kernel.K_xstarx(self.X[:self.N_m], pred_t))
-        KxstarxKinvY = tf.linalg.matvec(tf.matmul(K_xstarx, K_inv), tf.reshape(self.Y, -1))
-        return tf.reshape(KxstarxKinvY, (self.num_genes, pred_t.shape[0]))
+        K_xstarxK_inv = tf.matmul(K_xstarx, K_inv)
+        KxstarxKinvY = tf.linalg.matvec(K_xstarxK_inv, tf.reshape(self.Y, -1))
+        mu = tf.reshape(KxstarxKinvY, (self.num_genes, pred_t.shape[0]))
+        if compute_var:
+            K_xstarxstar = self.kernel.K_xstarx(pred_t, pred_t)
+            var = K_xstarxstar - tf.matmul(K_xstarxK_inv, tf.transpose(K_xstarx))
+            var = tf.reshape(tf.linalg.diag_part(var), (self.num_genes, pred_t.shape[0]))
+            return mu, var
+        return mu
 
     def predict_f(self, pred_t):
         Kxx = self.kernel.K(self.X, None)
         K_inv = tf.linalg.inv(Kxx)
         Kxf = self.kernel.K_xf(self.X, pred_t)
         KfxKxx = tf.matmul(tf.transpose(Kxf), K_inv)
-        return tf.matmul(KfxKxx, self.Y)
+        return tf.reshape(tf.matmul(KfxKxx, self.Y), -1)
