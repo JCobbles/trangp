@@ -1,3 +1,4 @@
+# pylint: disable=E1136
 import gpflow
 from gpflow.utilities import positive
 
@@ -14,9 +15,10 @@ from reggae.utilities import broadcast_tile, PI
 
 
 class LinearResponseKernel(gpflow.kernels.Kernel):
-    def __init__(self, num_genes):
+    def __init__(self, data, Y_var):
         super().__init__(active_dims=[0])
-        self.num_genes = num_genes
+        self.Y_var = Y_var
+        self.num_genes = data.m_obs.shape[1]
         #         l_affine = tfb.AffineScalar(shift=tf.cast(1., tf.float64),
         #                             scale=tf.cast(4-1., tf.float64))
         #         l_sigmoid = tfb.Sigmoid()
@@ -42,15 +44,15 @@ class LinearResponseKernel(gpflow.kernels.Kernel):
         self.kervar = gpflow.Parameter(np.float64(1), transform=positive())
         self.noise_term = gpflow.Parameter(0.1353*tf.ones(self.num_genes, dtype='float64'), transform=positive())
         
-    def Kxstarx(self, X, X2):
+    def K_xstarx(self, X, X2):
         '''Computes Kx*,x
         Args:
           X:  x the blocked observation vector
           X2: x* the non-blocked prediction timepoint vector
         '''
         self.hori_block_size = int(X2.shape[0])
-        self.vert_block_size = int(X.shape[0]/self.num_genes)
-        shape = [X.shape[0], X2.shape[0]*self.num_genes]
+        self.vert_block_size = int(X.shape[0])
+        shape = [X.shape[0]*self.num_genes, X2.shape[0]*self.num_genes]
         K_xx = tf.zeros(shape, dtype='float64')
         for j in range(self.num_genes):
             for k in range(self.num_genes):
@@ -72,8 +74,7 @@ class LinearResponseKernel(gpflow.kernels.Kernel):
         return K_xx
 
     def K(self, X, X2=None):
-        '''Computes Kxx or Kxf if X2 is not None'''
-
+        '''Computes Kxx'''
         self.block_size = int(X.shape[0]/self.num_genes)
         if X2 is None:
             shape = [X.shape[0],X.shape[0]]
@@ -100,33 +101,31 @@ class LinearResponseKernel(gpflow.kernels.Kernel):
 
     #         K_xx = self.k_xx(X, 0,0)        
             white = tf.linalg.diag(broadcast_tile(tf.reshape(self.noise_term, (1, -1)), 1, self.block_size)[0])
-            return K_xx + tf.linalg.diag((1e-5*tf.ones(X.shape[0], dtype='float64'))+Y_var) + white
-        else:
-            '''Calculate K_xf: no need to use tf.* since this part is not optimised'''
-            shape = [X.shape[0],X2.shape[0]]#self.block_size]
+            return K_xx + tf.linalg.diag((1e-5*tf.ones(X.shape[0], dtype='float64'))+self.Y_var) + white
 
-            K_xf = tf.zeros(shape, dtype='float64')
-            for j in range(self.num_genes):
-                mask = np.ones(shape)
-                other = np.zeros(shape)
-                mask[j*self.block_size:(j+1)*self.block_size] = 0
-                pad_top = j*self.block_size
-                pad_bottom = 0 if j == self.num_genes-1 else shape[0]-self.block_size-pad_top
-                kxf = self.k_xf(j, X, X2)
-                other = tf.pad(kxf,
-                               tf.constant([[pad_top,pad_bottom],[0,0]]), 'CONSTANT'
-                              )
 
-                K_xf = K_xf * mask + other * (1 - mask)
-                #[j*self.block_size:(j+1)*self.block_size] = 
-            return K_xf
+    def K_xf(self, X, X2):
+        '''Calculate K_xf: no need to use tf.* since this part is not optimised'''
+        shape = [X.shape[0],X2.shape[0]]#self.block_size]
+
+        K_xf = tf.zeros(shape, dtype='float64')
+        for j in range(self.num_genes):
+            mask = np.ones(shape)
+            other = np.zeros(shape)
+            mask[j*self.block_size:(j+1)*self.block_size] = 0
+            pad_top = j*self.block_size
+            pad_bottom = 0 if j == self.num_genes-1 else shape[0]-self.block_size-pad_top
+            kxf = self.k_xf(j, X, X2)
+            other = tf.pad(kxf, tf.constant([[pad_top,pad_bottom],[0,0]]), 'CONSTANT')
+
+            K_xf = K_xf * mask + other * (1 - mask)
+        return K_xf
         
     def k_xf(self, j, X, X2):
         t_prime, t_, t_dist = self.get_distance_matrix(t_x=tf.reshape(X[:self.block_size], (-1,)), 
                                                        t_y=X2)
         l = self.lengthscale
         erf_term = tfm.erf(t_dist/l - self.gamma(j)) + tfm.erf(t_/l + self.gamma(j))
-
         return self.S[j]*l*0.5*tfm.sqrt(PI)*tfm.exp(self.gamma(j)**2) *tfm.exp(-self.D[j]*t_dist)*erf_term 
 
     def _gamma(self):
