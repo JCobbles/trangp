@@ -1,7 +1,7 @@
 # pylint: disable=E1136
 import gpflow
 from gpflow.utilities import positive
-
+from gpflow.kernels import IndependentLatent, Kernel, Combination
 import numpy as np
 
 import tensorflow as tf
@@ -13,7 +13,10 @@ import tensorflow_probability as tfp
 
 from reggae.utilities import broadcast_tile, PI
 
-
+'''
+This kernel is the multi-output cross-kernel for linear response to single transcription factor.
+In other words, it constructs a JTxJT matrix where J is num genes and T is num timepoints.
+'''
 class LinearResponseKernel(gpflow.kernels.Kernel):
     def __init__(self, data, Y_var):
         super().__init__(active_dims=[0])
@@ -91,7 +94,7 @@ class LinearResponseKernel(gpflow.kernels.Kernel):
                     pad_left = k*self.block_size
                     pad_right = 0 if k == self.num_genes-1 else shape[0]-self.block_size-pad_left
                     pad_bottom = 0 if j == self.num_genes-1 else shape[0]-self.block_size-pad_top
-                    kxx = self.k_xx(X, j, k)#+self.noise_term*tf.linalg.eye(self.block_size, dtype='float64')\n",
+                    kxx = self.k_xx(X, j, k)
                     other = tf.pad(kxx,
                                       tf.constant([
                                           [pad_top,pad_bottom],
@@ -103,7 +106,9 @@ class LinearResponseKernel(gpflow.kernels.Kernel):
     #         K_xx = self.k_xx(X, 0,0)        
             white = tf.linalg.diag(broadcast_tile(tf.reshape(self.noise_term, (1, -1)), 1, self.block_size)[0])
             return K_xx + tf.linalg.diag((1e-5*tf.ones(X.shape[0], dtype='float64'))+self.Y_var) + white
-
+        else:
+            print('X not none', X2)
+            return self.K_xf(X, X2)
 
     def K_xf(self, X, X2):
         '''Calculate K_xf: no need to use tf.* since this part is not optimised'''
@@ -124,7 +129,7 @@ class LinearResponseKernel(gpflow.kernels.Kernel):
         
     def k_xf(self, j, X, X2):
         t_prime, t_, t_dist = self.get_distance_matrix(t_x=tf.reshape(X[:self.block_size], (-1,)), 
-                                                       t_y=X2)
+                                                       t_y=tf.reshape(X2, (-1, )))
         l = self.lengthscale
         erf_term = tfm.erf(t_dist/l - self.gamma(j)) + tfm.erf(t_/l + self.gamma(j))
         return self.S[j]*l*0.5*tfm.sqrt(PI)*tfm.exp(self.gamma(j)**2) *tfm.exp(-self.D[j]*t_dist)*erf_term 
@@ -193,7 +198,7 @@ class LinearResponseKernel(gpflow.kernels.Kernel):
             return t_1, t_2, t_1-t_2
         return t_2, t_1, t_2-t_1
     
-    def K_diag(self, X):
+    def K_ff(self, X):
         print('k_diag')
 
         """I've used the fact that we call this method for K_ff when finding the covariance as a hack so
@@ -203,3 +208,54 @@ class LinearResponseKernel(gpflow.kernels.Kernel):
         K_ff = self.kervar **2 * tfm.exp(-(t_dist**2)/(self.lengthscale**2))
         return (K_ff)
 
+    def K_diag(self, X):
+        return tf.linalg.diag_part(self.K(X))
+
+
+class LinearCoregionalization(IndependentLatent, Combination):
+    """
+    Linear mixing of the latent GPs to form the output.
+    """
+
+    def __init__(self, kernels, W, name=None):
+        Combination.__init__(self, kernels=kernels, name=name)
+        self.W = gpflow.Parameter(W)  # [P, L]
+
+    @property
+    def num_latent_gps(self):
+        return self.W.shape[-1]  # L
+
+    @property
+    def latent_kernels(self):
+        """The underlying kernels in the multioutput kernel"""
+        return tuple(self.kernels)
+
+    def Kgg(self, X, X2):
+        return tf.stack([k.K(X, X2) for k in self.kernels], axis=0)  # [L, N, N2]
+
+    def K(self, X, X2=None, full_output_cov=True):
+        Kxx = self.Kgg(X, X2)  # [L, N, N2]
+        W = broadcast_tile(self.W, 7, 1)
+        print(W.shape)
+        tf.print(W.shape)
+        KxxW = Kxx[None, :, :, :] * W[:, :, None, None]  # [P, L, N, N2]
+        if full_output_cov:
+            WKxxW = tf.tensordot(W, KxxW, [[1], [1]])  # [P, P, N, N2]
+            return tf.transpose(WKxxW, [2, 0, 3, 1])  # [N, P, N2, P]
+        else:
+            return tf.reduce_sum(W[:, :, None, None] * KxxW, [1])  # [P, N, N2]
+
+
+    def K_diag(self, X, full_output_cov=True):
+        K = tf.stack([k.K_diag(X) for k in self.kernels], axis=1)  # [N, L]
+        W = broadcast_tile(self.W, 7, 1)
+        # print(self.W)
+        if full_output_cov:
+            Wt = tf.transpose(W)  # [L, P]
+            return tf.reduce_sum(
+                K[:, :, None, None] * Wt[None, :, :, None] * Wt[None, :, None, :], axis=1
+            )  # [N, P, P]
+        else:
+            return tf.linalg.matmul(
+                K, W ** 2.0, transpose_b=True
+            )  # [N, L]  *  [L, P]  ->  [N, P]
